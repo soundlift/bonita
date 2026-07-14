@@ -34,4 +34,4 @@ jobs:
           file: ./docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: suwmlee/bonita:${{ github.event.inputs.publish_tag }}
+          tags: soundlife/bonita:${{ github.event.inputs.publish_tag }}
