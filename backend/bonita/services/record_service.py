@@ -33,6 +33,7 @@ class RecordService:
         limit: int = 100,
         task_id: Optional[int] = None,
         search: Optional[str] = None,
+        success: Optional[bool] = None,
         sort_by: str = "updatetime",
         sort_desc: bool = True
     ) -> Tuple[List[Tuple[TransRecords, Optional[ExtraInfo]]], int]:
@@ -43,6 +44,7 @@ class RecordService:
             limit: 限制返回记录数
             task_id: 任务ID过滤
             search: 搜索条件（匹配srcname和srcpath）
+            success: 状态过滤（True只返回成功，False只返回失败，None不过滤）
             sort_by: 排序字段
             sort_desc: 是否降序排序
 
@@ -62,6 +64,8 @@ class RecordService:
                     TransRecords.srcpath.like(f"%{search}%")
                 )
             )
+        if success is not None:
+            query = query.filter(TransRecords.success == success)
 
         # 添加排序
         sort_field = getattr(TransRecords, sort_by, TransRecords.updatetime)
@@ -84,6 +88,8 @@ class RecordService:
                     TransRecords.srcpath.like(f"%{search}%")
                 )
             )
+        if success is not None:
+            count_query = count_query.filter(TransRecords.success == success)
 
         count = count_query.count()
         return records, count

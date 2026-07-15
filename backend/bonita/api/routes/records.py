@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from typing import Any, List
+from typing import Any, List, Optional
 
 from bonita import schemas
 from bonita.api.deps import SessionDep
@@ -15,12 +15,14 @@ def get_records(
     limit: int = 100,
     task_id: int = None,
     search: str = None,
+    success: Optional[bool] = None,
     sort_by: str = "createtime",
     sort_desc: bool = True
 ) -> Any:
     """ 获取记录信息 包含 ExtraInfo
     可以根据task_id进行精确过滤
     search参数可同时模糊匹配srcname和srcpath
+    success参数可以按状态过滤（True只返回成功，False只返回失败，None不过滤）
     sort_by参数可以指定排序字段，默认按createtime排序
     sort_desc参数可以指定是否降序排序，默认为True
     """
@@ -30,6 +32,7 @@ def get_records(
         limit=limit,
         task_id=task_id,
         search=search,
+        success=success,
         sort_by=sort_by,
         sort_desc=sort_desc
     )
