@@ -19,6 +19,7 @@ export const useRecordStore = defineStore("record-store", {
         itemsPerPage: number
         search?: string
         taskId?: number
+        success?: boolean | null
         sortBy?: string
         sortDesc?: boolean
       } = {
@@ -35,6 +36,7 @@ export const useRecordStore = defineStore("record-store", {
           limit,
           search: options.search,
           taskId: options.taskId,
+          success: options.success ?? undefined,
           sortBy: options.sortBy,
           sortDesc: options.sortDesc,
         })

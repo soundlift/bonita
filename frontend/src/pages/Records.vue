@@ -10,12 +10,24 @@ const { t } = useI18n() // 导入国际化工具函数
 
 const searchQuery = ref("")
 const taskIdQuery = ref("")
+const successFilter = ref<boolean | null>(null)
 const searchTimeout = ref<number | null>(null)
 const selected = ref<number[]>([])
 const tagColorMap = {
   中文字幕: "#FF0000",
   破解: "#FFA500",
 } as const
+
+// localStorage 持久化
+const STORAGE_KEY = "records-view-settings"
+let settingsLoaded = false
+
+// 状态筛选选项
+const statusOptions = computed(() => [
+  { value: null, title: t("pages.records.allStatus") },
+  { value: true, title: t("pages.records.successStatus") },
+  { value: false, title: t("pages.records.failedStatus") },
+])
 
 // 刷新相关变量
 const autoRefresh = ref(true) // 是否自动刷新
@@ -74,13 +86,14 @@ const formatDateTime = (dateStr: string | null | undefined) => {
   })
 }
 
-const headers = [
+const allHeaders = [
   {
     title: t("pages.records.name"),
     align: "start" as "start" | "center" | "end",
     key: "transfer_record.srcname",
     width: 250,
     sortable: true,
+    alwaysVisible: true,
   },
   {
     title: t("pages.records.status"),
@@ -145,13 +158,30 @@ const headers = [
     width: 120,
     sortable: true,
   },
-  {
-    title: t("common.actions"),
-    key: "actions",
-    sortable: false,
-    width: 100,
-  },
 ]
+
+// actions 列始终单独追加，不可配置
+const actionsHeader = {
+  title: t("common.actions"),
+  key: "actions",
+  sortable: false,
+  width: 100,
+  alwaysVisible: true,
+}
+
+// 可配置列的 key 列表（不含 actions）
+const configurableKeys = allHeaders.map((h) => h.key)
+
+// 用户可见的列 key
+const visibleColumnKeys = ref<string[]>([...configurableKeys])
+
+// 实际渲染的 headers：过滤可见列 + 始终追加 actions
+const displayedHeaders = computed(() => {
+  return [
+    ...allHeaders.filter((h) => visibleColumnKeys.value.includes(h.key)),
+    actionsHeader,
+  ]
+})
 
 // 默认排序设置
 const sortBy = ref([
@@ -187,6 +217,7 @@ const loadData = async (
     itemsPerPage: number
     search?: string
     taskId?: number
+    success?: boolean | null
     sortBy?: string
     sortDesc?: boolean
   } = {
@@ -205,6 +236,11 @@ const loadData = async (
   // 如果有搜索内容，则添加到搜索参数
   if (searchQuery.value.trim()) {
     searchParams.search = searchQuery.value.trim()
+  }
+
+  // 如果有状态筛选，则添加到搜索参数
+  if (successFilter.value !== null) {
+    searchParams.success = successFilter.value
   }
 
   // 添加排序参数
@@ -276,6 +312,51 @@ const manualRefresh = async () => {
   await loadData(recordStore.currentPage, recordStore.itemsPerPage)
 }
 
+// 保存视图设置到 localStorage
+const saveSettings = () => {
+  try {
+    const settings = {
+      successFilter: successFilter.value,
+      visibleColumnKeys: visibleColumnKeys.value,
+      sortBy: sortBy.value,
+      itemsPerPage: recordStore.itemsPerPage,
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
+  } catch {
+    // 存储失败时静默忽略
+  }
+}
+
+// 从 localStorage 恢复视图设置
+const loadSettings = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return
+    const settings = JSON.parse(raw)
+    if (settings.successFilter !== undefined) {
+      successFilter.value = settings.successFilter
+    }
+    if (Array.isArray(settings.visibleColumnKeys) && settings.visibleColumnKeys.length > 0) {
+      // 只保留有效的 key，确保名称列始终在内
+      const valid = settings.visibleColumnKeys.filter((k: string) =>
+        configurableKeys.includes(k),
+      )
+      if (!valid.includes("transfer_record.srcname")) {
+        valid.push("transfer_record.srcname")
+      }
+      visibleColumnKeys.value = valid
+    }
+    if (Array.isArray(settings.sortBy) && settings.sortBy.length > 0) {
+      sortBy.value = settings.sortBy
+    }
+    if (typeof settings.itemsPerPage === "number" && settings.itemsPerPage > 0) {
+      recordStore.itemsPerPage = settings.itemsPerPage
+    }
+  } catch {
+    // 解析失败时静默忽略，使用默认值
+  }
+}
+
 async function initial() {
   await loadData()
 }
@@ -305,7 +386,7 @@ const confirmDelete = async () => {
 }
 
 // 更新 watch 函数以实现搜索功能，添加防抖
-watch([searchQuery, taskIdQuery], () => {
+watch([searchQuery, taskIdQuery, successFilter], () => {
   // 清除之前的定时器
   if (searchTimeout.value) {
     clearTimeout(searchTimeout.value)
@@ -318,10 +399,31 @@ watch([searchQuery, taskIdQuery], () => {
   }, 300) as unknown as number
 })
 
+// 持久化视图设置（在 settings 加载完成后才激活）
+watch(
+  [successFilter, visibleColumnKeys, sortBy],
+  () => {
+    if (settingsLoaded) {
+      saveSettings()
+    }
+  },
+  { deep: true },
+)
+
+watch(
+  () => recordStore.itemsPerPage,
+  () => {
+    if (settingsLoaded) {
+      saveSettings()
+    }
+  },
+)
+
 // 清除搜索并重新加载数据
 const handleClearSearch = () => {
   searchQuery.value = ""
   taskIdQuery.value = ""
+  successFilter.value = null
   loadData(1, recordStore.itemsPerPage)
 }
 
@@ -329,6 +431,12 @@ const handleClearSearch = () => {
 const handleSortChange = (newSortBy: any) => {
   sortBy.value = newSortBy
   loadData(recordStore.currentPage, recordStore.itemsPerPage)
+}
+
+// 行属性（用于标记已删除行的样式）
+const rowProps = ({ item }: { item: any }) => {
+  const isDeleted = item.transfer_record.deleted || item.transfer_record.srcdeleted
+  return isDeleted ? { class: 'deleted-row' } : {}
 }
 
 // 组件卸载时清除定时器
@@ -340,6 +448,8 @@ onBeforeUnmount(() => {
 })
 
 onMounted(() => {
+  loadSettings()
+  settingsLoaded = true
   initial()
 })
 </script>
@@ -359,9 +469,28 @@ onMounted(() => {
           <v-text-field v-model="taskIdQuery" :placeholder="t('pages.records.filterTaskId')" hide-details density="comfortable"
             class="task-id-input" prepend-inner-icon="mdi-pound" clearable type="number"
             @click:clear="taskIdQuery = ''; loadData(1, recordStore.itemsPerPage)" />
+
+          <v-select v-model="successFilter" :items="statusOptions" item-title="title" item-value="value"
+            :placeholder="t('pages.records.statusFilter')" hide-details density="comfortable"
+            class="status-select" prepend-inner-icon="mdi-filter-variant" clearable />
         </div>
         
         <div class="d-flex align-center gap-2">
+          <!-- 列选择 -->
+          <v-menu :close-on-content-click="false" location="bottom end">
+            <template v-slot:activator="{ props }">
+              <v-btn v-bind="props" size="small" variant="tonal" color="secondary"
+                prepend-icon="mdi-view-column">
+                {{ t('pages.records.columnSettings') }}
+              </v-btn>
+            </template>
+            <v-list density="compact" class="py-1" min-width="180">
+              <v-list-item v-for="header in allHeaders" :key="header.key" class="px-2">
+                <v-checkbox v-model="visibleColumnKeys" :value="header.key" :label="header.title"
+                  :disabled="header.alwaysVisible" hide-details density="compact" color="primary" />
+              </v-list-item>
+            </v-list>
+          </v-menu>
           <!-- 刷新状态和控件 -->
           <div class="refresh-controls d-flex align-center">
             <v-tooltip :text="autoRefresh ? t('pages.records.refreshOn') : t('pages.records.refreshOff')">
@@ -398,7 +527,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="search-filters mt-2 mb-1 d-flex flex-wrap align-center gap-2" v-if="searchQuery || taskIdQuery">
+      <div class="search-filters mt-2 mb-1 d-flex flex-wrap align-center gap-2" v-if="searchQuery || taskIdQuery || successFilter !== null">
         <v-chip v-if="searchQuery" color="primary" size="default" variant="elevated" class="search-chip">
           <v-icon start size="small" class="mr-1">mdi-magnify</v-icon>
           {{ t('pages.records.nameFilter') }}: {{ searchQuery }}
@@ -415,77 +544,113 @@ onMounted(() => {
           </template>
         </v-chip>
 
-        <v-btn v-if="searchQuery || taskIdQuery" icon="mdi-close-circle" size="small" color="error" variant="text"
+        <v-chip v-if="successFilter !== null" color="success" size="default" variant="elevated" class="search-chip">
+          <v-icon start size="small" class="mr-1">mdi-filter-variant</v-icon>
+          {{ t('pages.records.statusFilter') }}: {{ successFilter ? t('pages.records.successStatus') : t('pages.records.failedStatus') }}
+          <template v-slot:append>
+            <v-icon size="small" @click="successFilter = null">mdi-close</v-icon>
+          </template>
+        </v-chip>
+
+        <v-btn v-if="searchQuery || taskIdQuery || successFilter !== null" icon="mdi-close-circle" size="small" color="error" variant="text"
           @click="handleClearSearch" class="ml-1 clear-all-btn">
           <v-tooltip activator="parent" location="top">{{ t('pages.records.clearFilters') }}</v-tooltip>
         </v-btn>
       </div>
     </div>
 
-    <v-data-table v-model="selected" :headers="headers" :items="recordStore.records" item-value="transfer_record.id"
+    <v-data-table v-model="selected" :headers="displayedHeaders" :items="recordStore.records" item-value="transfer_record.id"
       show-select :loading="recordStore.loading" :sort-by="sortBy" height="auto" :items-per-page="-1"
+      :row-props="rowProps"
       @update:sort-by="handleSortChange">
-      <!-- 自定义表格行 -->
-      <template v-slot:item="{ item, columns, index }">
-        <tr :class="{ 'deleted-row': item.transfer_record.deleted || item.transfer_record.srcdeleted }">
-          <td><v-checkbox v-model="selected" :value="item.transfer_record.id" multiple hide-details></v-checkbox></td>
-          <td>
-            <v-tooltip :text="item.transfer_record.srcpath">
-              <template v-slot:activator="{ props }">
-                <span v-bind="props" class="text-truncate d-inline-block" style="max-width: 230px">
-                  {{ item.transfer_record.srcname }}
-                </span>
-              </template>
-            </v-tooltip>
-          </td>
-          <td>
-            <v-chip 
-              v-if="item.transfer_record.success !== null"
-              :color="item.transfer_record.success ? 'success' : 'error'" 
-              variant="flat" 
-              size="small"
-              class="status-chip">
-              <v-icon 
-                :icon="item.transfer_record.success ? 'bx-check' : 'bx-x'" 
-                size="small">
-              </v-icon>
-            </v-chip>
-          </td>
-          <td>
-            <v-tooltip :text="item.transfer_record.destpath || ''">
-              <template v-slot:activator="{ props }">
-                <span v-bind="props" class="text-truncate d-inline-block" style="max-width: 180px"
-                  :class="{ 'text-decoration-line-through': item.transfer_record.deleted }">
-                  {{ item.transfer_record.destpath || '' }}
-                </span>
-              </template>
-            </v-tooltip>
-          </td>
-          <td>{{ item.transfer_record.season === -1 ? '' : item.transfer_record.season }}</td>
-          <td>{{ item.transfer_record.episode === -1 ? '' : item.transfer_record.episode }}</td>
-          <td>{{ item.extra_info?.number || '' }}</td>
-          <td>
-            <div v-if="item.extra_info?.tag" class="d-flex gap-1 flex-wrap">
-              <v-chip v-for="tag in item.extra_info.tag.split(',')" :key="tag" :color="getTagColor(tag)" variant="flat"
-                class="tag-chip" size="small">
-                {{ tag.trim() }}
-              </v-chip>
-            </div>
-          </td>
-          <td>{{ formatDateTime(item.transfer_record.createtime) }}</td>
-          <td>{{ formatDateTime(item.transfer_record.updatetime) }}</td>
-          <td>{{ formatDateTime(item.transfer_record.deadtime) }}</td>
-          <td>
-            <div class="d-flex align-center gap-2">
-              <VBtn type="submit" size="small" @click="showSelectedRecord(item)">
-                <VIcon icon="bx-edit-alt" />
-              </VBtn>
-              <VBtn type="submit" size="small" @click="rerunThisRecord(item)">
-                <VIcon icon="bx-refresh" />
-              </VBtn>
-            </div>
-          </td>
-        </tr>
+      <!-- 名称列 -->
+      <template v-slot:item.transfer_record.srcname="{ item }">
+        <v-tooltip :text="item.transfer_record.srcpath">
+          <template v-slot:activator="{ props }">
+            <span v-bind="props" class="text-truncate d-inline-block" style="max-width: 230px">
+              {{ item.transfer_record.srcname }}
+            </span>
+          </template>
+        </v-tooltip>
+      </template>
+
+      <!-- 状态列 -->
+      <template v-slot:item.transfer_record.success="{ item }">
+        <v-chip
+          v-if="item.transfer_record.success !== null"
+          :color="item.transfer_record.success ? 'success' : 'error'"
+          variant="flat"
+          size="small"
+          class="status-chip">
+          <v-icon
+            :icon="item.transfer_record.success ? 'bx-check' : 'bx-x'"
+            size="small">
+          </v-icon>
+        </v-chip>
+      </template>
+
+      <!-- 目标路径列 -->
+      <template v-slot:item.transfer_record.destpath="{ item }">
+        <v-tooltip :text="item.transfer_record.destpath || ''">
+          <template v-slot:activator="{ props }">
+            <span v-bind="props" class="text-truncate d-inline-block" style="max-width: 180px"
+              :class="{ 'text-decoration-line-through': item.transfer_record.deleted }">
+              {{ item.transfer_record.destpath || '' }}
+            </span>
+          </template>
+        </v-tooltip>
+      </template>
+
+      <!-- 季列 -->
+      <template v-slot:item.transfer_record.season="{ item }">
+        {{ item.transfer_record.season === -1 ? '' : item.transfer_record.season }}
+      </template>
+
+      <!-- 集列 -->
+      <template v-slot:item.transfer_record.episode="{ item }">
+        {{ item.transfer_record.episode === -1 ? '' : item.transfer_record.episode }}
+      </template>
+
+      <!-- 编号列 -->
+      <template v-slot:item.extra_info.number="{ item }">
+        {{ item.extra_info?.number || '' }}
+      </template>
+
+      <!-- 标签列 -->
+      <template v-slot:item.extra_info.tag="{ item }">
+        <div v-if="item.extra_info?.tag" class="d-flex gap-1 flex-wrap">
+          <v-chip v-for="tag in item.extra_info.tag.split(',')" :key="tag" :color="getTagColor(tag)" variant="flat"
+            class="tag-chip" size="small">
+            {{ tag.trim() }}
+          </v-chip>
+        </div>
+      </template>
+
+      <!-- 创建时间列 -->
+      <template v-slot:item.transfer_record.createtime="{ item }">
+        {{ formatDateTime(item.transfer_record.createtime) }}
+      </template>
+
+      <!-- 更新时间列 -->
+      <template v-slot:item.transfer_record.updatetime="{ item }">
+        {{ formatDateTime(item.transfer_record.updatetime) }}
+      </template>
+
+      <!-- 截止时间列 -->
+      <template v-slot:item.transfer_record.deadtime="{ item }">
+        {{ formatDateTime(item.transfer_record.deadtime) }}
+      </template>
+
+      <!-- 操作列 -->
+      <template v-slot:item.actions="{ item }">
+        <div class="d-flex align-center gap-2">
+          <VBtn type="submit" size="small" @click="showSelectedRecord(item)">
+            <VIcon icon="bx-edit-alt" />
+          </VBtn>
+          <VBtn type="submit" size="small" @click="rerunThisRecord(item)">
+            <VIcon icon="bx-refresh" />
+          </VBtn>
+        </div>
       </template>
 
       <!-- 自定义底部分页 -->
@@ -592,6 +757,11 @@ onMounted(() => {
   min-width: 150px;
 }
 
+.status-select {
+  max-width: 140px;
+  min-width: 120px;
+}
+
 .delete-btn {
   white-space: nowrap;
 }
@@ -610,7 +780,7 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .search-input, .task-id-input {
+  .search-input, .task-id-input, .status-select {
     min-width: 0;
     width: 100%;
   }
