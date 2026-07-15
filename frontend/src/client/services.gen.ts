@@ -496,6 +496,7 @@ export class RecordService {
                 limit: data.limit,
                 task_id: data.taskId,
                 search: data.search,
+                success: data.success,
                 sort_by: data.sortBy,
                 sort_desc: data.sortDesc
             },
