@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from bonita.db.models.setting import SystemSetting
 from typing import List, Dict, Optional, Any, Union, Tuple
+import json
 
 
 class SettingService:
@@ -248,4 +249,37 @@ class SettingService:
             "transmission_dest_path",
             dest_path,
             "Transmission路径映射-宿主机路径"
+        )
+
+    # ===== 番号解析黑名单 =====
+
+    PARSE_BLACKLIST_KEY = "parse_blacklist"
+
+    def get_parse_blacklist(self) -> List[Dict[str, Any]]:
+        """获取番号解析黑名单
+
+        Returns:
+            List[Dict]: 黑名单规则列表，每条 {"id": str, "mode": "literal"|"regex", "value": str, "enabled": bool}
+        """
+        raw = self.get_setting(self.PARSE_BLACKLIST_KEY, "")
+        if not raw:
+            return []
+        try:
+            result = json.loads(raw)
+            if isinstance(result, list):
+                return result
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return []
+
+    def update_parse_blacklist(self, blacklist: List[Dict[str, Any]]) -> None:
+        """保存番号解析黑名单
+
+        Args:
+            blacklist: 黑名单规则列表
+        """
+        self.set_setting(
+            self.PARSE_BLACKLIST_KEY,
+            json.dumps(blacklist, ensure_ascii=False),
+            "番号解析黑名单"
         )

@@ -727,6 +727,12 @@ export type DeleteRecordsData = {
 
 export type DeleteRecordsResponse = Response;
 
+export type RetryRecordsData = {
+    recordIds: Array<(number)>;
+};
+
+export type RetryRecordsResponse = Response;
+
 export type GetTransRecordsData = {
     limit?: number;
     skip?: number;
@@ -883,6 +889,36 @@ export type TestTransmissionConnectionData = {
 };
 
 export type TestTransmissionConnectionResponse = Response;
+
+export type ParseBlacklistItem = {
+    id: string;
+    mode: string;
+    value: string;
+    enabled?: boolean;
+};
+
+export type GetParseBlacklistResponse = {
+    data: Array<ParseBlacklistItem>;
+    success: boolean;
+};
+
+export type UpdateParseBlacklistData = {
+    requestBody: Array<ParseBlacklistItem>;
+};
+
+export type UpdateParseBlacklistResponse = Response;
+
+export type PreviewParseBlacklistData = {
+    requestBody: {
+        filename: string;
+        blacklist: Array<ParseBlacklistItem>;
+    };
+};
+
+export type PreviewParseBlacklistResponse = {
+    cleaned_filename: string;
+    parsed_number: string | null;
+};
 
 export type GetImageByQueryData = {
     path: string;

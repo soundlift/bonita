@@ -41,6 +41,9 @@ const lastDataHash = ref("") // 上次数据的哈希值，用于检测变化
 const deleteDialog = ref(false)
 const forceDelete = ref(false)
 
+// 重试确认对话框
+const retryDialog = ref(false)
+
 // 分页选项
 const pageSizeOptions = [10, 25, 50, 100]
 
@@ -385,6 +388,18 @@ const confirmDelete = async () => {
   selected.value = []
 }
 
+const handleRetry = () => {
+  if (selected.value.length === 0) return
+  retryDialog.value = true
+}
+
+const confirmRetry = async () => {
+  await recordStore.retryRecords(selected.value)
+  retryDialog.value = false
+  selected.value = []
+  await loadData(recordStore.currentPage, recordStore.itemsPerPage)
+}
+
 // 更新 watch 函数以实现搜索功能，添加防抖
 watch([searchQuery, taskIdQuery, successFilter], () => {
   // 清除之前的定时器
@@ -520,6 +535,11 @@ onMounted(() => {
             </div>
           </div>
           
+          <v-btn color="warning" :disabled="selected.length === 0" prepend-icon="mdi-refresh" @click="handleRetry"
+            size="default" class="retry-btn">
+            {{ t('pages.records.retrySelected', { count: selected.length }) }}
+          </v-btn>
+
           <v-btn color="error" :disabled="selected.length === 0" prepend-icon="mdi-delete" @click="handleDelete"
             size="default" class="delete-btn">
             {{ t('pages.records.deleteSelected', { count: selected.length }) }}
@@ -576,17 +596,37 @@ onMounted(() => {
 
       <!-- 状态列 -->
       <template v-slot:item.transfer_record.success="{ item }">
+        <!-- 成功 -->
         <v-chip
-          v-if="item.transfer_record.success !== null"
-          :color="item.transfer_record.success ? 'success' : 'error'"
+          v-if="item.transfer_record.success === true"
+          color="success"
           variant="flat"
           size="small"
           class="status-chip">
-          <v-icon
-            :icon="item.transfer_record.success ? 'bx-check' : 'bx-x'"
-            size="small">
-          </v-icon>
+          <v-icon icon="bx-check" size="small" />
         </v-chip>
+        <!-- 失败 -->
+        <v-chip
+          v-else-if="item.transfer_record.success === false"
+          color="error"
+          variant="flat"
+          size="small"
+          class="status-chip">
+          <v-icon icon="bx-x" size="small" />
+        </v-chip>
+        <!-- 中断 (null) -->
+        <v-tooltip v-else :text="t('pages.records.interruptedStatus')">
+          <template v-slot:activator="{ props }">
+            <v-chip
+              v-bind="props"
+              color="grey"
+              variant="flat"
+              size="small"
+              class="status-chip">
+              <v-icon icon="mdi-alert" size="small" />
+            </v-chip>
+          </template>
+        </v-tooltip>
       </template>
 
       <!-- 目标路径列 -->
@@ -696,6 +736,27 @@ onMounted(() => {
       </VCardActions>
     </VCard>
   </VDialog>
+
+  <!-- 重试确认对话框 -->
+  <VDialog v-model="retryDialog" max-width="500">
+    <VCard>
+      <VCardTitle class="text-h5">
+        {{ t('pages.records.retryDialog.title') }}
+      </VCardTitle>
+      <VCardText>
+        {{ t('pages.records.retryDialog.message', { count: selected.length }) }}
+      </VCardText>
+      <VCardActions>
+        <VSpacer />
+        <VBtn color="primary" variant="text" @click="retryDialog = false">
+          {{ t('pages.records.retryDialog.cancel') }}
+        </VBtn>
+        <VBtn color="warning" @click="confirmRetry">
+          {{ t('pages.records.retryDialog.confirm') }}
+        </VBtn>
+      </VCardActions>
+    </VCard>
+  </VDialog>
 </template>
 
 <style scoped>
@@ -763,6 +824,10 @@ onMounted(() => {
 }
 
 .delete-btn {
+  white-space: nowrap;
+}
+
+.retry-btn {
   white-space: nowrap;
 }
 

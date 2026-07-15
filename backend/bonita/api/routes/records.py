@@ -158,6 +158,31 @@ def delete_records(
     )
 
 
+@router.post("/retry", response_model=schemas.Response)
+def retry_records(
+    session: SessionDep,
+    record_ids: List[int],
+) -> Any:
+    """批量重试转移记录
+
+    对每条记录重新提交转移任务。某条记录失败不影响其他记录。
+
+    Args:
+        session: 数据库会话
+        record_ids: 要重试的记录ID列表
+
+    Returns:
+        重试操作的结果汇总
+    """
+    record_service = RecordService(session)
+    success, message, _ = record_service.retry_records(record_ids)
+
+    return schemas.Response(
+        success=success,
+        message=message
+    )
+
+
 @router.get("/transrecords", response_model=schemas.TransferRecordsPublic)
 def get_trans_records(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     record_service = RecordService(session)

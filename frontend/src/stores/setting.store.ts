@@ -2,6 +2,7 @@ import { SettingsService } from "@/client/services.gen"
 import type {
   EmbySettings,
   JellyfinSettings,
+  ParseBlacklistItem,
   ProxySettings,
   TestEmbyConnectionData,
   TestJellyfinConnectionData,
@@ -34,6 +35,8 @@ interface SettingState {
   testingJellyfin: boolean
   /** Transmission测试状态 */
   testingTransmission: boolean
+  /** 番号解析黑名单 */
+  parseBlacklist: ParseBlacklistItem[]
 }
 
 export const useSettingStore = defineStore("setting-store", {
@@ -68,6 +71,7 @@ export const useSettingStore = defineStore("setting-store", {
       testingEmby: false,
       testingJellyfin: false,
       testingTransmission: false,
+      parseBlacklist: [] as ParseBlacklistItem[],
     }
   },
   actions: {
@@ -317,6 +321,46 @@ export const useSettingStore = defineStore("setting-store", {
         throw error
       } finally {
         this.testingTransmission = false
+      }
+    },
+
+    // ===== 番号解析黑名单 =====
+
+    async fetchParseBlacklist() {
+      const toast = useToastStore()
+      try {
+        const response = await SettingsService.getParseBlacklist()
+        this.parseBlacklist = response.data || []
+        return this.parseBlacklist
+      } catch (error) {
+        console.error("Error fetching parse blacklist:", error)
+        toast.error("获取番号解析黑名单失败")
+        return []
+      }
+    },
+
+    async updateParseBlacklist(data: ParseBlacklistItem[]) {
+      const toast = useToastStore()
+      try {
+        await SettingsService.updateParseBlacklist({ requestBody: data })
+        this.parseBlacklist = data
+        toast.success("黑名单已保存")
+      } catch (error) {
+        console.error("Error updating parse blacklist:", error)
+        toast.error("保存黑名单失败")
+        throw error
+      }
+    },
+
+    async previewParse(filename: string, blacklist: ParseBlacklistItem[]) {
+      try {
+        const response = await SettingsService.previewParseBlacklist({
+          requestBody: { filename, blacklist },
+        })
+        return response
+      } catch (error) {
+        console.error("Error previewing parse:", error)
+        return null
       }
     },
   },

@@ -1,4 +1,5 @@
 import { type RecordPublic, RecordService } from "@/client"
+import { useToastStore } from "./toast.store"
 
 import { defineStore } from "pinia"
 
@@ -114,6 +115,24 @@ export const useRecordStore = defineStore("record-store", {
         }
       } else {
         console.error(`Record with id ${id} not found.`)
+      }
+    },
+    async retryRecords(ids: number[]) {
+      const toast = useToastStore()
+      try {
+        const response = await RecordService.retryRecords({
+          recordIds: ids,
+        })
+        if (response.success) {
+          toast.success(response.message ?? "重试完成")
+        } else {
+          toast.error(response.message ?? "重试失败")
+        }
+        return response
+      } catch (error) {
+        console.error("批量重试失败:", error)
+        toast.error("批量重试失败")
+        throw error
       }
     },
   },

@@ -11,8 +11,7 @@ export default {
     metadata: "Metadata",
     mediaitems: "Media Items",
     tools: "Tools",
-    serviceSettings: "Service Settings",
-    userSettings: "User Settings",
+    settings: "Settings",
     logs: "System Logs",
   },
   common: {
@@ -219,6 +218,33 @@ export default {
       syncRecordPathFailed: "Failed to sync transfer record paths: Unknown error",
       syncRecordPathFailedWithDetail: "Failed to sync transfer record paths: {detail}",
     },
+    settings: {
+      title: "Settings",
+      tabs: {
+        security: "Security",
+        service: "Services",
+        parse: "Number Parsing",
+      },
+      parseBlacklist: {
+        title: "Number Parsing Blacklist",
+        description: "Configure strings or regex patterns to filter from filenames. These rules only apply during number parsing and do not modify original filenames.",
+        ruleList: "Rules",
+        addRule: "Add Rule",
+        confirmAdd: "Add",
+        mode: "Match Mode",
+        literal: "Literal",
+        regex: "Regex",
+        value: "Value",
+        enabled: "Enabled",
+        empty: "No rules yet. Click Add Rule to create one.",
+        save: "Save",
+        preview: "Preview",
+        previewPlaceholder: "Enter test filename, e.g. hhd800.com@MKMP-725.mp4",
+        cleanedResult: "Cleaned",
+        parsedResult: "Parsed Number",
+        parseFailed: "Parse failed",
+      },
+    },
     serviceSettings: {
       title: "Service Settings",
       proxy: {
@@ -307,6 +333,7 @@ export default {
       search: "Search Filename",
       filterTaskId: "Filter Task ID",
       deleteSelected: "Delete Selected ({count})",
+      retrySelected: "Retry Selected ({count})",
       nameFilter: "Filename",
       taskIdFilter: "Task ID",
       clearFilters: "Clear All Filters",
@@ -329,6 +356,7 @@ export default {
       allStatus: "All",
       successStatus: "Success",
       failedStatus: "Failed",
+      interruptedStatus: "Interrupted",
       refreshOn: "Auto-refresh is on",
       refreshOff: "Auto-refresh is off",
       manualRefresh: "Refresh now",
@@ -341,6 +369,13 @@ export default {
         forceDelete: "Force Delete (Ignore Lock Status)",
         cancel: "Cancel",
         confirm: "Delete",
+      },
+      retryDialog: {
+        title: "Confirm Retry",
+        message:
+          "Retry the {count} selected records?",
+        cancel: "Cancel",
+        confirm: "Retry",
       },
     },
     scraping: {

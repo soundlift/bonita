@@ -64,8 +64,11 @@ class RecordService:
                     TransRecords.srcpath.like(f"%{search}%")
                 )
             )
-        if success is not None:
-            query = query.filter(TransRecords.success == success)
+        if success is True:
+            query = query.filter(TransRecords.success == True)
+        elif success is False:
+            # 失败筛选包含 False 和 NULL（中断的记录）
+            query = query.filter(or_(TransRecords.success == False, TransRecords.success.is_(None)))
 
         # 添加排序
         sort_field = getattr(TransRecords, sort_by, TransRecords.updatetime)
@@ -88,8 +91,11 @@ class RecordService:
                     TransRecords.srcpath.like(f"%{search}%")
                 )
             )
-        if success is not None:
-            count_query = count_query.filter(TransRecords.success == success)
+        if success is True:
+            count_query = count_query.filter(TransRecords.success == True)
+        elif success is False:
+            # 失败筛选包含 False 和 NULL（中断的记录）
+            count_query = count_query.filter(or_(TransRecords.success == False, TransRecords.success.is_(None)))
 
         count = count_query.count()
         return records, count
@@ -385,6 +391,64 @@ class RecordService:
             message = f"成功删除 {deleted_count} 条记录{torrent_info_msg}"
 
         return success, message, deleted_count, failed_ids
+
+    def retry_records(self, record_ids: List[int]) -> Tuple[bool, str, int]:
+        """批量重试转移记录
+
+        对每条记录查询其 task_id 和 srcpath，提交 celery_transfer_group 异步任务。
+        某条记录失败不影响其他记录。
+
+        Args:
+            record_ids: 记录ID列表
+
+        Returns:
+            Tuple[bool, str, int]: 成功状态（是否有至少一条成功）、汇总消息、成功提交数
+        """
+        from bonita.celery_tasks.tasks import celery_transfer_group
+        from bonita.db.models.task import TransferConfig
+
+        if not record_ids:
+            return False, "未提供记录ID", 0
+
+        success_count = 0
+        failed_details = []
+
+        for record_id in record_ids:
+            transfer_record, _ = self.get_record_by_id(record_id)
+
+            if not transfer_record:
+                failed_details.append(f"record #{record_id} 不存在")
+                continue
+
+            if not transfer_record.task_id or transfer_record.task_id == 0:
+                failed_details.append(f"record #{record_id} task_id 无效")
+                continue
+
+            task_conf = self.session.get(TransferConfig, transfer_record.task_id)
+            if not task_conf:
+                failed_details.append(f"record #{record_id} task_id={transfer_record.task_id} 配置不存在")
+                continue
+
+            srcpath = transfer_record.srcpath
+            if not srcpath or not os.path.exists(srcpath):
+                failed_details.append(f"record #{record_id} 源文件不存在")
+                continue
+
+            try:
+                celery_transfer_group.delay(task_conf.to_dict(), srcpath, True)
+                success_count += 1
+            except Exception as e:
+                logger.error(f"重试 record #{record_id} 提交失败: {e}")
+                failed_details.append(f"record #{record_id} 提交失败: {e}")
+
+        if success_count > 0:
+            message = f"成功重试 {success_count} 条"
+            if failed_details:
+                message += f"，失败 {len(failed_details)} 条：{'；'.join(failed_details)}"
+        else:
+            message = f"全部失败（{len(failed_details)} 条）：{'；'.join(failed_details)}"
+
+        return success_count > 0, message, success_count
 
     def get_trans_records(self, skip: int = 0, limit: int = 100) -> Tuple[List[TransRecords], int]:
         """获取所有转移记录

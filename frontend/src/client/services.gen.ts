@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { LoginAccessTokenData, LoginAccessTokenResponse, ReadUsersData, ReadUsersResponse, CreateUserData, CreateUserResponse, ReadUserMeResponse, DeleteUserMeResponse, UpdateUserMeData, UpdateUserMeResponse, UpdatePasswordMeData, UpdatePasswordMeResponse, RegisterUserData, RegisterUserResponse, ReadUserByIdData, ReadUserByIdResponse, UpdateUserData, UpdateUserResponse, DeleteUserData, DeleteUserResponse, RunTransferTaskData, RunTransferTaskResponse, GetAllTasksStatusData, GetAllTasksStatusResponse, CleanupRunningTasksResponse, GetAllTaskConfigsData, GetAllTaskConfigsResponse, CreateTaskConfigData, CreateTaskConfigResponse, UpdateTaskConfigData, UpdateTaskConfigResponse, DeleteTaskConfigData, DeleteTaskConfigResponse, GetAllConfigsData, GetAllConfigsResponse, CreateConfigData, CreateConfigResponse, UpdateConfigData, UpdateConfigResponse, DeleteConfigData, DeleteConfigResponse, GetRecordsData, GetRecordsResponse, UpdateRecordData, UpdateRecordResponse, UpdateTopFolderData, UpdateTopFolderResponse, UpdateSeasonData, UpdateSeasonResponse, DeleteRecordsData, DeleteRecordsResponse, GetTransRecordsData, GetTransRecordsResponse, CreateMetadataData, CreateMetadataResponse, GetMetadataData, GetMetadataResponse, UpdateMetadataData, UpdateMetadataResponse, DeleteMetadataData, DeleteMetadataResponse, GetMediaItemsData, GetMediaItemsResponse, CreateMediaItemData, CreateMediaItemResponse, GetMediaItemData, GetMediaItemResponse, UpdateMediaItemData, UpdateMediaItemResponse, DeleteMediaItemData, DeleteMediaItemResponse, CleanMediaItemResponse, RunImportNfoData, RunImportNfoResponse, RunEmbyScanData, RunEmbyScanResponse, SyncRecordPathData, SyncRecordPathResponse, SyncEmbyWatchHistoryData, SyncEmbyWatchHistoryResponse, CleanupDataData, CleanupDataResponse, GetProxySettingsResponse, UpdateProxySettingsData, UpdateProxySettingsResponse, GetEmbySettingsResponse, UpdateEmbySettingsData, UpdateEmbySettingsResponse, TestEmbyConnectionData, TestEmbyConnectionResponse, GetJellyfinSettingsResponse, UpdateJellyfinSettingsData, UpdateJellyfinSettingsResponse, TestJellyfinConnectionData, TestJellyfinConnectionResponse, GetTransmissionSettingsResponse, UpdateTransmissionSettingsData, UpdateTransmissionSettingsResponse, TestTransmissionConnectionData, TestTransmissionConnectionResponse, GetImageByQueryData, GetImageByQueryResponse, UploadImageData, UploadImageResponse, GetPosterData, GetPosterResponse, ListDirectoryData, ListDirectoryResponse, HealthCheckResponse } from './types.gen';
+import type { LoginAccessTokenData, LoginAccessTokenResponse, ReadUsersData, ReadUsersResponse, CreateUserData, CreateUserResponse, ReadUserMeResponse, DeleteUserMeResponse, UpdateUserMeData, UpdateUserMeResponse, UpdatePasswordMeData, UpdatePasswordMeResponse, RegisterUserData, RegisterUserResponse, ReadUserByIdData, ReadUserByIdResponse, UpdateUserData, UpdateUserResponse, DeleteUserData, DeleteUserResponse, RunTransferTaskData, RunTransferTaskResponse, GetAllTasksStatusData, GetAllTasksStatusResponse, CleanupRunningTasksResponse, GetAllTaskConfigsData, GetAllTaskConfigsResponse, CreateTaskConfigData, CreateTaskConfigResponse, UpdateTaskConfigData, UpdateTaskConfigResponse, DeleteTaskConfigData, DeleteTaskConfigResponse, GetAllConfigsData, GetAllConfigsResponse, CreateConfigData, CreateConfigResponse, UpdateConfigData, UpdateConfigResponse, DeleteConfigData, DeleteConfigResponse, GetRecordsData, GetRecordsResponse, UpdateRecordData, UpdateRecordResponse, UpdateTopFolderData, UpdateTopFolderResponse, UpdateSeasonData, UpdateSeasonResponse, DeleteRecordsData, DeleteRecordsResponse, RetryRecordsData, RetryRecordsResponse, GetTransRecordsData, GetTransRecordsResponse, CreateMetadataData, CreateMetadataResponse, GetMetadataData, GetMetadataResponse, UpdateMetadataData, UpdateMetadataResponse, DeleteMetadataData, DeleteMetadataResponse, GetMediaItemsData, GetMediaItemsResponse, CreateMediaItemData, CreateMediaItemResponse, GetMediaItemData, GetMediaItemResponse, UpdateMediaItemData, UpdateMediaItemResponse, DeleteMediaItemData, DeleteMediaItemResponse, CleanMediaItemResponse, RunImportNfoData, RunImportNfoResponse, RunEmbyScanData, RunEmbyScanResponse, SyncRecordPathData, SyncRecordPathResponse, SyncEmbyWatchHistoryData, SyncEmbyWatchHistoryResponse, CleanupDataData, CleanupDataResponse, GetProxySettingsResponse, UpdateProxySettingsData, UpdateProxySettingsResponse, GetEmbySettingsResponse, UpdateEmbySettingsData, UpdateEmbySettingsResponse, TestEmbyConnectionData, TestEmbyConnectionResponse, GetJellyfinSettingsResponse, UpdateJellyfinSettingsData, UpdateJellyfinSettingsResponse, TestJellyfinConnectionData, TestJellyfinConnectionResponse, GetTransmissionSettingsResponse, UpdateTransmissionSettingsData, UpdateTransmissionSettingsResponse, TestTransmissionConnectionData, TestTransmissionConnectionResponse, GetParseBlacklistResponse, UpdateParseBlacklistData, UpdateParseBlacklistResponse, PreviewParseBlacklistData, PreviewParseBlacklistResponse, GetImageByQueryData, GetImageByQueryResponse, UploadImageData, UploadImageResponse, GetPosterData, GetPosterResponse, ListDirectoryData, ListDirectoryResponse, HealthCheckResponse } from './types.gen';
 
 export class LoginService {
     /**
@@ -628,6 +628,27 @@ export class RecordService {
     }
     
     /**
+     * Retry Records
+     * 批量重试转移记录
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns Response Successful Response
+     * @throws ApiError
+     */
+    public static retryRecords(data: RetryRecordsData): CancelablePromise<RetryRecordsResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/records/retry',
+            query: {
+                record_ids: data.recordIds
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * Get Trans Records
      * @param data The data for the request.
      * @param data.skip
@@ -1232,7 +1253,58 @@ export class SettingsService {
             }
         });
     }
-    
+
+    /**
+     * Get Parse Blacklist
+     */
+    public static getParseBlacklist(): CancelablePromise<GetParseBlacklistResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/settings/parse-blacklist',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Update Parse Blacklist
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns Response Successful Response
+     * @throws ApiError
+     */
+    public static updateParseBlacklist(data: UpdateParseBlacklistData): CancelablePromise<UpdateParseBlacklistResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/settings/parse-blacklist',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Preview Parse Blacklist
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static previewParseBlacklist(data: PreviewParseBlacklistData): CancelablePromise<PreviewParseBlacklistResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/settings/parse-blacklist/preview',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
 }
 
 export class ResourceService {

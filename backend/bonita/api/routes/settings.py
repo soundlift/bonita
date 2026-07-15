@@ -1,7 +1,8 @@
 import requests
 from urllib.parse import urljoin
-from typing import Any
+from typing import Any, List, Dict
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 import traceback
 
 from bonita import schemas
@@ -306,3 +307,89 @@ def test_transmission_connection(
             success=False,
             message=f"测试Transmission连接时出错: {str(e)}"
         )
+
+
+# ===== 番号解析黑名单 =====
+
+class ParseBlacklistItem(BaseModel):
+    id: str
+    mode: str  # "literal" | "regex"
+    value: str
+    enabled: bool = True
+
+
+class ParseBlacklistPreviewRequest(BaseModel):
+    filename: str
+    blacklist: List[ParseBlacklistItem]
+
+
+@router.get("/parse-blacklist")
+def get_parse_blacklist(session: SessionDep) -> Any:
+    """获取番号解析黑名单"""
+    try:
+        setting_service = SettingService(session)
+        data = setting_service.get_parse_blacklist()
+        return {"data": data, "success": True}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/parse-blacklist", response_model=schemas.Response)
+def update_parse_blacklist(
+    session: SessionDep,
+    blacklist: List[ParseBlacklistItem],
+) -> Any:
+    """保存番号解析黑名单"""
+    try:
+        setting_service = SettingService(session)
+        setting_service.update_parse_blacklist(
+            [item.model_dump() for item in blacklist]
+        )
+        return schemas.Response(success=True, message="黑名单已更新")
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/parse-blacklist/preview")
+def preview_parse_blacklist(
+    session: SessionDep,
+    preview_data: ParseBlacklistPreviewRequest,
+) -> Any:
+    """预览番号解析黑名单效果
+
+    使用传入的黑名单（而非数据库中的）对 filename 执行清理和解析。
+    """
+    import re
+    from bonita.modules.scraping.number_parser import G_spat, rules_parser
+
+    filename = preview_data.filename
+
+    # 如果文件名带路径，取 basename 并去掉扩展名
+    import os
+    basename = os.path.basename(filename)
+    cleaned, _ = os.path.splitext(basename)
+
+    # Step 1: 应用内置 G_spat 清理
+    cleaned = G_spat.sub("", cleaned)
+
+    # Step 2: 应用用户黑名单
+    for item in preview_data.blacklist:
+        if not item.enabled or not item.value:
+            continue
+        if item.mode == "literal":
+            cleaned = cleaned.replace(item.value, "")
+        elif item.mode == "regex":
+            try:
+                cleaned = re.sub(item.value, "", cleaned)
+            except re.error:
+                pass  # 无效正则跳过
+
+    # Step 3: 解析番号
+    parsed_number = rules_parser(cleaned)
+
+    return {
+        "cleaned_filename": cleaned,
+        "parsed_number": parsed_number,
+    }

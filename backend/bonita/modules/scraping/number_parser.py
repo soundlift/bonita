@@ -145,6 +145,52 @@ class FileNumInfo():
         return tags
 
 
+def get_blacklist_from_db() -> list:
+    """从数据库读取番号解析黑名单
+
+    Returns:
+        list: 黑名单规则列表
+    """
+    try:
+        from bonita.db import SessionFactory
+        from bonita.services.setting_service import SettingService
+        session = SessionFactory()
+        try:
+            return SettingService(session).get_parse_blacklist()
+        finally:
+            session.close()
+    except Exception as e:
+        logging.getLogger().debug(f"读取黑名单失败: {e}")
+        return []
+
+
+def apply_blacklist(filename: str, blacklist: list) -> str:
+    """应用黑名单规则清理文件名
+
+    Args:
+        filename: 待清理的文件名
+        blacklist: 黑名单规则列表 [{"mode": "literal"|"regex", "value": str, "enabled": bool}]
+
+    Returns:
+        str: 清理后的文件名
+    """
+    for item in blacklist:
+        if not item.get('enabled', True):
+            continue
+        value = item.get('value', '')
+        mode = item.get('mode', 'literal')
+        if not value:
+            continue
+        if mode == 'literal':
+            filename = filename.replace(value, '')
+        elif mode == 'regex':
+            try:
+                filename = re.sub(value, '', filename)
+            except re.error:
+                logging.getLogger().warning(f"黑名单正则无效，已跳过: {value}")
+    return filename
+
+
 def get_number(file_path: str) -> str:
     """ 获取番号
     """
@@ -153,6 +199,11 @@ def get_number(file_path: str) -> str:
         file_subpath = os.path.dirname(file_path)
         file_subpath = os.path.basename(file_subpath)
         (filename, ext) = os.path.splitext(basename)
+
+        # 前置清理：内置 G_spat + 用户自定义黑名单
+        filename = G_spat.sub("", filename)
+        filename = apply_blacklist(filename, get_blacklist_from_db())
+
         file_number = rules_parser(filename)
         if file_number is None:
             # 文件名不包含，查看文件夹

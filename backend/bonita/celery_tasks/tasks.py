@@ -343,6 +343,9 @@ def celery_transfer_group(self, task_json, full_path, isEntry=False):
                 record.success = True
         except Exception as e:
             logger.error(e)
+            # 异常中断时将当前 record 标记为失败，避免 success 停留在 None
+            if 'record' in locals() and record is not None:
+                record.success = False
         finally:
             session.commit()
             session.close()

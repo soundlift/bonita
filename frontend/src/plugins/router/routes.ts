@@ -7,10 +7,9 @@ import MediaitemPage from "@/pages/Mediaitem.vue"
 import MetadataPage from "@/pages/Metadata.vue"
 import RecordsPage from "@/pages/Records.vue"
 import ScrapingConfigsPage from "@/pages/ScrapingConfigs.vue"
-import ServiceSettingsPage from "@/pages/ServiceSettings.vue"
+import SettingsPage from "@/pages/Settings.vue"
 import TaskPage from "@/pages/Task.vue"
 import ToolsPage from "@/pages/Tools.vue"
-import UserSettingsPage from "@/pages/UserSettings.vue"
 import errorpage from "@/pages/[...error].vue"
 
 export const routes = [
@@ -74,14 +73,17 @@ export const routes = [
     component: defaultlayout,
     children: [
       {
-        path: "user",
+        path: "",
         meta: { requiresAuth: true },
-        component: UserSettingsPage,
+        component: SettingsPage,
+      },
+      {
+        path: "user",
+        redirect: { path: "/settings", query: { tab: "security" } },
       },
       {
         path: "service",
-        meta: { requiresAuth: true },
-        component: ServiceSettingsPage,
+        redirect: { path: "/settings", query: { tab: "service" } },
       },
       {
         path: "logs",
