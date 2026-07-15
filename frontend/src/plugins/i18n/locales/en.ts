@@ -320,6 +320,7 @@ export default {
       episode: "Episode",
       number: "Number",
       tag: "Tag",
+      createTime: "Create Time",
       updateTime: "Update Time",
       deadTime: "Dead Time",
       actions: "Actions",

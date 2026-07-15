@@ -309,6 +309,7 @@ export default {
       episode: "集",
       number: "编号",
       tag: "标签",
+      createTime: "创建时间",
       updateTime: "更新时间",
       deadTime: "截止时间",
       actions: "操作",

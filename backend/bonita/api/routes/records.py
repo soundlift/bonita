@@ -15,13 +15,13 @@ def get_records(
     limit: int = 100,
     task_id: int = None,
     search: str = None,
-    sort_by: str = "updatetime",
+    sort_by: str = "createtime",
     sort_desc: bool = True
 ) -> Any:
     """ 获取记录信息 包含 ExtraInfo
     可以根据task_id进行精确过滤
     search参数可同时模糊匹配srcname和srcpath
-    sort_by参数可以指定排序字段，默认按updatetime排序
+    sort_by参数可以指定排序字段，默认按createtime排序
     sort_desc参数可以指定是否降序排序，默认为True
     """
     record_service = RecordService(session)

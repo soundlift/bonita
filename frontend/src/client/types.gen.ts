@@ -471,6 +471,7 @@ export type TransferRecordPublic = {
     episode?: number | null;
     linkpath?: string | null;
     destpath?: string | null;
+    createtime?: string | null;
     updatetime?: string | null;
     deadtime?: string | null;
     id: number;

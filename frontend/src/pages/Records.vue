@@ -125,6 +125,13 @@ const headers = [
     sortable: false,
   },
   {
+    title: t("pages.records.createTime"),
+    align: "center" as "start" | "center" | "end",
+    key: "transfer_record.createtime",
+    width: 120,
+    sortable: true,
+  },
+  {
     title: t("pages.records.updateTime"),
     align: "center" as "start" | "center" | "end",
     key: "transfer_record.updatetime",
@@ -149,7 +156,7 @@ const headers = [
 // 默认排序设置
 const sortBy = ref([
   {
-    key: "transfer_record.updatetime",
+    key: "transfer_record.createtime",
     order: "desc" as const,
   },
 ])
@@ -465,6 +472,7 @@ onMounted(() => {
               </v-chip>
             </div>
           </td>
+          <td>{{ formatDateTime(item.transfer_record.createtime) }}</td>
           <td>{{ formatDateTime(item.transfer_record.updatetime) }}</td>
           <td>{{ formatDateTime(item.transfer_record.deadtime) }}</td>
           <td>
