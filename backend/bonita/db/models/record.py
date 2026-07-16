@@ -33,6 +33,7 @@ class TransRecords(Base):
     # 链接使用的地址，可能与docker内地址不同
     linkpath = Column(String, default='')
     destpath = Column(String, default='')
+    filesize = Column(Integer, nullable=True, comment='源文件大小(字节)')
     # 完全删除时间，包括源文件和目标路径文件
     deadtime = Column(DateTime, default=None, comment='time to delete files')
 

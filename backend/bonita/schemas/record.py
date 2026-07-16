@@ -29,6 +29,8 @@ class TransferRecordBase(BaseModel):
     linkpath: Optional[str] = None
     destpath: Optional[str] = None
 
+    filesize: Optional[int] = None
+
     createtime: Optional[datetime] = None
     updatetime: Optional[datetime] = None
     deadtime: Optional[datetime] = None
