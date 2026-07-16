@@ -70,7 +70,7 @@ export const useRecordStore = defineStore("record-store", {
     },
     async deleteRecords(ids: number[], force = false) {
       const response = await RecordService.deleteRecords({
-        requestBody: ids,
+        recordIds: ids,
         force: force,
       })
       if (response.success) {

@@ -607,7 +607,7 @@ export class RecordService {
      * Returns:
      * 删除操作的结果
      * @param data The data for the request.
-     * @param data.requestBody
+     * @param data.recordIds
      * @param data.force
      * @returns Response Successful Response
      * @throws ApiError
@@ -617,10 +617,9 @@ export class RecordService {
             method: 'DELETE',
             url: '/api/v1/records/records',
             query: {
+                record_ids: data.recordIds,
                 force: data.force
             },
-            body: data.requestBody,
-            mediaType: 'application/json',
             errors: {
                 422: 'Validation Error'
             }

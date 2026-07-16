@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from typing import Any, List, Optional
 
 from bonita import schemas
@@ -136,7 +136,7 @@ def update_season(
 @router.delete("/records", response_model=schemas.Response)
 def delete_records(
     session: SessionDep,
-    record_ids: List[int],
+    record_ids: List[int] = Query(..., description="要删除的记录ID列表"),
     force: bool = False
 ) -> Any:
     """删除记录信息
@@ -161,7 +161,7 @@ def delete_records(
 @router.post("/retry", response_model=schemas.Response)
 def retry_records(
     session: SessionDep,
-    record_ids: List[int],
+    record_ids: List[int] = Query(..., description="要重试的记录ID列表"),
 ) -> Any:
     """批量重试转移记录
 

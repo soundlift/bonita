@@ -471,6 +471,7 @@ export type TransferRecordPublic = {
     episode?: number | null;
     linkpath?: string | null;
     destpath?: string | null;
+    filesize?: number | null;
     createtime?: string | null;
     updatetime?: string | null;
     deadtime?: string | null;
@@ -722,7 +723,7 @@ export type UpdateSeasonResponse = Response;
 
 export type DeleteRecordsData = {
     force?: boolean;
-    requestBody: Array<(number)>;
+    recordIds: Array<(number)>;
 };
 
 export type DeleteRecordsResponse = Response;
