@@ -89,6 +89,14 @@ const formatDateTime = (dateStr: string | null | undefined) => {
   })
 }
 
+const formatFileSize = (bytes: number | null | undefined) => {
+  if (bytes == null || bytes === undefined) return ""
+  if (bytes < 1024) return bytes + " B"
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " K"
+  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " M"
+  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " G"
+}
+
 const allHeaders = [
   {
     title: t("pages.records.name"),
@@ -104,6 +112,13 @@ const allHeaders = [
     key: "transfer_record.success",
     width: 100,
     sortable: false,
+  },
+  {
+    title: t("pages.records.fileSize"),
+    align: "center" as "start" | "center" | "end",
+    key: "transfer_record.filesize",
+    width: 100,
+    sortable: true,
   },
   {
     title: t("pages.records.destPath"),
@@ -627,6 +642,11 @@ onMounted(() => {
             </v-chip>
           </template>
         </v-tooltip>
+      </template>
+
+      <!-- 文件大小列 -->
+      <template v-slot:item.transfer_record.filesize="{ item }">
+        <span class="text-no-wrap">{{ formatFileSize(item.transfer_record.filesize) }}</span>
       </template>
 
       <!-- 目标路径列 -->

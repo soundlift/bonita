@@ -343,6 +343,7 @@ export default {
       status: "Status",
       path: "Path",
       destPath: "Destination Path",
+      fileSize: "Size",
       season: "Season",
       episode: "Episode",
       number: "Number",
@@ -373,7 +374,7 @@ export default {
       retryDialog: {
         title: "Confirm Retry",
         message:
-          "Retry the {count} selected records?",
+          "Retry the {count} selected records? This will re-parse the number, re-scrape metadata, and delete existing destination files.",
         cancel: "Cancel",
         confirm: "Retry",
       },
@@ -586,6 +587,7 @@ export default {
         softLink: "Soft Link",
         move: "Move",
         copy: "Copy",
+        moveWarning: "Move mode deletes the source file. If scraping or disk errors occur during transfer, the source file may be unrecoverable. Hard link is recommended.",
         autoWatch: "Auto Watch",
         cleanOthers: "Clean Others",
         enableScraping: "Enable Scraping",

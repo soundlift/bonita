@@ -156,6 +156,15 @@ async function handleSubmit() {
                 :value="option.value"
               />
             </VRadioGroup>
+            <VAlert
+              v-if="currentTask.operation === 3"
+              type="warning"
+              variant="tonal"
+              density="compact"
+              class="mt-2"
+            >
+              {{ t('components.task.form.moveWarning') }}
+            </VAlert>
           </VCol>
         </VRow>
       </VCol>
