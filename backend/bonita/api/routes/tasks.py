@@ -28,8 +28,8 @@ async def run_transfer_task(
     task_dict = task_conf.to_dict()
 
     if path_param.path:
-        # 如果提供了path参数，针对指定路径运行任务
-        task = celery_transfer_group.delay(task_dict, path_param.path.strip(), True)
+        # 如果提供了path参数，针对指定路径运行任务（单条重试场景触发完全重新开始）
+        task = celery_transfer_group.delay(task_dict, path_param.path.strip(), True, force_refresh=True)
         task_type = 'TransferGroup'
         detail = path_param.path.strip()
     else:

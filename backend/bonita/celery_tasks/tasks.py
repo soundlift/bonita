@@ -17,7 +17,7 @@ from bonita.db.models.scraping import ScrapingConfig
 from bonita.modules.scraping.number_parser import FileNumInfo
 from bonita.modules.scraping.scraping import add_mark, need_crop, process_nfo_file, process_cover, scraping, load_all_NFO_from_folder
 from bonita.utils.fileinfo import BasicFileInfo, TargetFileInfo
-from bonita.modules.transfer.transfer import transSingleFile, transferfile
+from bonita.modules.transfer.transfer import transSingleFile, transferfile, verify_transfer, rollback_transfer
 from bonita.utils.downloader import process_cached_file, download_file, update_cache_from_local
 from bonita.utils.filehelper import cleanFolderWithoutSuffix, findAllFilesWithSuffix, video_type
 from bonita.utils.http import get_active_proxy
@@ -108,7 +108,7 @@ def celery_transfer_entry(self, task_json):
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3},
              name='transfer:group')
 @manage_celery_task("TransferGroup")
-def celery_transfer_group(self, task_json, full_path, isEntry=False):
+def celery_transfer_group(self, task_json, full_path, isEntry=False, force_refresh=False):
     """ 对 group/folder 内所有关联文件进行转移
     """
     with semaphore:
@@ -191,6 +191,19 @@ def celery_transfer_group(self, task_json, full_path, isEntry=False):
                     continue
                 record.task_id = task_info.id
                 record.success = None
+                # 记录源文件大小
+                try:
+                    record.filesize = os.path.getsize(original_file.full_path)
+                except (OSError, TypeError):
+                    record.filesize = None
+                # force_refresh（完全重新开始）：无条件删除旧的目标文件
+                if force_refresh and record.destpath:
+                    if os.path.exists(record.destpath):
+                        logger.info(f"      ↻ 强制刷新：删除旧目标文件 {record.destpath}")
+                        try:
+                            os.remove(record.destpath)
+                        except OSError as e:
+                            logger.warning(f"      ⊘ 删除旧目标文件失败: {e}")
                 if task_info.sc_enabled:
                     logger.info("      → 刮削模式")
                     scraping_conf = session.query(ScrapingConfig).filter(ScrapingConfig.id == task_info.sc_id).first()
@@ -198,11 +211,12 @@ def celery_transfer_group(self, task_json, full_path, isEntry=False):
                         logger.error("      ✗ 刮削配置未找到")
                         record.success = False
                         continue
-                    scraping_task = celery_scrapping.apply(args=[original_file.full_path, scraping_conf.to_dict()])
+                    # ===== 状态: PENDING → 刮削 =====
+                    scraping_task = celery_scrapping.apply(args=[original_file.full_path, scraping_conf.to_dict(), force_refresh])
                     with allow_join_result():
                         metabase_json = scraping_task.get()
                     if not metabase_json:
-                        logger.error("      ✗ 刮削失败")
+                        logger.error("      ✗ 刮削失败，保留源文件")
                         record.success = False
                         continue
                     metamixed = schemas.MetadataMixed.model_validate(metabase_json)
@@ -215,8 +229,15 @@ def celery_transfer_group(self, task_json, full_path, isEntry=False):
                         output_folder = base_output
                     if not os.path.exists(output_folder):
                         os.makedirs(output_folder)
-                    # 更新NFO文件/cover
-                    process_nfo_file(output_folder, metamixed.extra_filename, metamixed.__dict__)
+
+                    # ===== 状态: PENDING → AUX_READY =====
+                    # NFO 写入前置：本地 I/O，失败说明目录不可写，阻断转移保留源文件
+                    try:
+                        process_nfo_file(output_folder, metamixed.extra_filename, metamixed.__dict__)
+                    except Exception as nfo_err:
+                        logger.error(f"      ✗ NFO 写入失败，阻断转移保留源文件: {nfo_err}")
+                        record.success = False
+                        continue
 
                     # 尝试下载封面，最多重试3次
                     proxy = get_active_proxy(session)
@@ -302,14 +323,24 @@ def celery_transfer_group(self, task_json, full_path, isEntry=False):
                             add_mark(pics, metamixed.tag, scraping_conf.watermark_location, scraping_conf.watermark_size)
                     else:
                         logger.warning("      ⊘ 封面获取失败，跳过封面图片处理")
+                    # ===== 状态: AUX_READY → TRANSFERRED =====
                     # 移动
                     destpath = transSingleFile(original_file, output_folder,
                                                metamixed.extra_filename, task_info.operation)
                     done_list.append(destpath)
+
+                    # ===== 状态: TRANSFERRED → VERIFIED =====
+                    if not verify_transfer(destpath, record.filesize):
+                        logger.error(f"      ✗ 转移校验失败，回滚清理目标半成品: {destpath}")
+                        rollback_transfer(destpath)
+                        record.success = False
+                        continue
+
                     if record.destpath != destpath:
                         # 如果新的路径和之前不同，则删除之前的文件
                         if os.path.exists(record.destpath):
                             os.remove(record.destpath)
+                    # ===== 状态: VERIFIED → COMMITTED =====
                     # 更新
                     record.destpath = destpath
                     logger.info("      ✓ 刮削转移完成")
@@ -321,15 +352,25 @@ def celery_transfer_group(self, task_json, full_path, isEntry=False):
                     # 如果 record 中定义了剧集信息，则使用 record 中的信息
                     if record.isepisode:
                         target_file.force_update_episode(record.isepisode, record.season, record.episode)
+                    # ===== 状态: AUX_READY → TRANSFERRED =====
                     # 开始转移
                     target_file = transferfile(original_file, target_file,
                                                optimize_name_tag=task_info.optimize_name, series_tag=is_series,
                                                file_list=waiting_list, linktype=task_info.operation)
                     done_list.append(target_file.full_path)
+
+                    # ===== 状态: TRANSFERRED → VERIFIED =====
+                    if not verify_transfer(target_file.full_path, record.filesize):
+                        logger.error(f"      ✗ 转移校验失败，回滚清理目标半成品: {target_file.full_path}")
+                        rollback_transfer(target_file.full_path)
+                        record.success = False
+                        continue
+
                     if record.destpath != target_file.full_path:
                         # 如果新的路径和之前不同，则删除之前的文件
                         if os.path.exists(record.destpath):
                             os.remove(record.destpath)
+                    # ===== 状态: VERIFIED → COMMITTED =====
                     # 更新
                     record.isepisode = target_file.is_episode
                     record.season = target_file.season_number
@@ -364,7 +405,7 @@ def celery_transfer_group(self, task_json, full_path, isEntry=False):
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3},
              name='scraping:single')
-def celery_scrapping(self, file_path, scraping_dict):
+def celery_scrapping(self, file_path, scraping_dict, force_refresh=False):
     logger.info(f"    ▸ [刮削] {os.path.basename(file_path)}")
     try:
         session = SessionFactory()
@@ -381,29 +422,41 @@ def celery_scrapping(self, file_path, scraping_dict):
             extrainfo.tag = ', '.join(map(str, fileNumInfo.tags()))
             extrainfo.create(session)
         else:
-            if extrainfo.crop is None:
-                if need_crop(extrainfo.number):
-                    extrainfo.crop = True
-                else:
-                    extrainfo.crop = False
+            if force_refresh:
+                # 完全重新开始：重新解析编号/标签/分集，保留用户指定的源/URL/crop 意图
+                logger.info(f"      ↻ 强制刷新解析字段: {extrainfo.number} → {fileNumInfo.num}")
+                extrainfo.number = fileNumInfo.num
+                extrainfo.partNumber = int(fileNumInfo.part.replace("-CD", "")) if fileNumInfo.part else 0
+                extrainfo.tag = ', '.join(map(str, fileNumInfo.tags()))
+                # crop 仅当为 None 时根据新 number 推断，保留用户已设置的值
+                if extrainfo.crop is None:
+                    extrainfo.crop = need_crop(extrainfo.number)
+            else:
+                if extrainfo.crop is None:
+                    if need_crop(extrainfo.number):
+                        extrainfo.crop = True
+                    else:
+                        extrainfo.crop = False
         # 处理指定源/强制从网站更新
         metadata_record = None
-        if extrainfo.specifiedurl:
-            metadata_record = session.query(Metadata).filter(
-                Metadata.number == extrainfo.number,
-                Metadata.detailurl == extrainfo.specifiedurl).order_by(Metadata.id.desc()).first()
-        elif extrainfo.specifiedsource:
-            metadata_record = session.query(Metadata).filter(
-                Metadata.number == extrainfo.number,
-                Metadata.site == extrainfo.specifiedsource).order_by(Metadata.id.desc()).first()
-        if not metadata_record:
-            metadata_record = session.query(Metadata).filter(
-                Metadata.number == extrainfo.number).order_by(Metadata.id.desc()).first()
+        # force_refresh 时跳过本地 Metadata 缓存，强制走网络抓取
+        if not force_refresh:
+            if extrainfo.specifiedurl:
+                metadata_record = session.query(Metadata).filter(
+                    Metadata.number == extrainfo.number,
+                    Metadata.detailurl == extrainfo.specifiedurl).order_by(Metadata.id.desc()).first()
+            elif extrainfo.specifiedsource:
+                metadata_record = session.query(Metadata).filter(
+                    Metadata.number == extrainfo.number,
+                    Metadata.site == extrainfo.specifiedsource).order_by(Metadata.id.desc()).first()
+            if not metadata_record:
+                metadata_record = session.query(Metadata).filter(
+                    Metadata.number == extrainfo.number).order_by(Metadata.id.desc()).first()
         if metadata_record:
             logger.info(f"      ✓ 使用缓存: {metadata_record.number}")
             metadata_mixed = schemas.MetadataMixed(**metadata_record.to_dict())
         else:
-            # 如果没有找到任何记录，则从网络抓取
+            # 如果没有找到任何记录（或 force_refresh 强制），则从网络抓取
             logger.info(f"      → 网络抓取: {extrainfo.number}")
             proxy = get_active_proxy(session)
             json_data = scraping(extrainfo.number,

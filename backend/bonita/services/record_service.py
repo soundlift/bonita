@@ -435,7 +435,7 @@ class RecordService:
                 continue
 
             try:
-                celery_transfer_group.delay(task_conf.to_dict(), srcpath, True)
+                celery_transfer_group.delay(task_conf.to_dict(), srcpath, True, force_refresh=True)
                 success_count += 1
             except Exception as e:
                 logger.error(f"重试 record #{record_id} 提交失败: {e}")

@@ -6,9 +6,55 @@ import logging
 
 from bonita.utils.fileinfo import BasicFileInfo, TargetFileInfo
 from bonita.utils.regex import matchSeason, simpleMatchEp
-from bonita.utils.filehelper import OperationMethod, linkFile, video_type, subext_type, replaceRegex, replaceCJK, cleanFilebyNameSuffix, moveSubs
+from bonita.utils.filehelper import OperationMethod, linkFile, video_type, subext_type, replaceRegex, replaceCJK, cleanFilebyNameSuffix, cleanFilebyFilter, moveSubs
 
 logger = logging.getLogger(__name__)
+
+
+class TransferVerifyError(Exception):
+    """转移校验失败异常（目标文件不存在或大小不一致）"""
+    pass
+
+
+def verify_transfer(destpath: str, expected_size) -> bool:
+    """校验目标文件完整性
+
+    Args:
+        destpath: 目标文件路径
+        expected_size: 期望的文件大小（字节）；None 时仅校验存在性
+
+    Returns:
+        bool: True 校验通过；False 校验失败（文件不存在或大小不一致）
+    """
+    if not destpath or not os.path.exists(destpath):
+        return False
+    if expected_size is None:
+        return True
+    try:
+        return os.path.getsize(destpath) == expected_size
+    except OSError:
+        return False
+
+
+def rollback_transfer(destpath: str) -> None:
+    """回滚：清理目标目录中本次转移写入的半成品文件
+
+    按 destpath 的 basename（不含扩展名）作为 filter 清理目标目录下所有匹配文件。
+    异常仅记录 error 不抛出，避免影响上层 record 状态设置流程。
+
+    Args:
+        destpath: 目标文件路径（用于推断清理目录和 filter）
+    """
+    if not destpath:
+        return
+    try:
+        clean_folder = os.path.dirname(destpath)
+        name_filter = os.path.splitext(os.path.basename(destpath))[0]
+        if clean_folder and name_filter:
+            cleanFilebyFilter(clean_folder, name_filter)
+            logger.info(f"      ↺ 回滚清理: {clean_folder} / {name_filter}*")
+    except Exception as e:
+        logger.error(f"      ✗ 回滚清理失败: {e}")
 
 
 def _handle_group_naming(original_file: BasicFileInfo, target_file: TargetFileInfo, file_list: list):
