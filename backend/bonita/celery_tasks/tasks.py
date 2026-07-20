@@ -521,16 +521,25 @@ def celery_scrapping(self, file_path, scraping_dict, force_refresh=False):
             metadata_mixed = schemas.MetadataMixed(**metadata_record.to_dict())
 
         # 根据规则生成文件夹和文件名
+        # title / actor 截断：max_title_len 同时作用于 naming_rule 与 location_rule，
+        # 并独立判断（旧逻辑只看 location_rule，导致 naming_rule 的 title 漏截）。
         maxlen = scraping_conf.max_title_len
-        extra_folder = eval(scraping_conf.location_rule, metadata_mixed.__dict__)
-        extra_name = eval(scraping_conf.naming_rule, metadata_mixed.__dict__)
-        if 'actor' in scraping_conf.location_rule and len(metadata_mixed.actor) > maxlen:
-            extra_folder = eval(scraping_conf.location_rule.replace("actor", "'多人作品'"), metadata_mixed.__dict__)
-            extra_name = eval(scraping_conf.naming_rule.replace("actor", "'多人作品'"), metadata_mixed.__dict__)
-        if 'title' in scraping_conf.location_rule and len(metadata_mixed.title) > maxlen:
-            shorttitle = metadata_mixed.title[0:maxlen]
-            extra_folder = extra_folder.replace(metadata_mixed.title, shorttitle)
-            extra_name = extra_name.replace(metadata_mixed.title, shorttitle)
+        rule_folder = scraping_conf.location_rule
+        rule_name = scraping_conf.naming_rule
+        md = metadata_mixed.__dict__
+        short_title = metadata_mixed.title[0:maxlen] if len(metadata_mixed.title) > maxlen else metadata_mixed.title
+        short_actor = "多人作品" if len(metadata_mixed.actor) > maxlen else metadata_mixed.actor
+
+        def _apply_short(rule: str) -> str:
+            """对单条规则应用 title/actor 截断后求值"""
+            if 'title' in rule and len(metadata_mixed.title) > maxlen:
+                rule = rule.replace("title", repr(short_title))
+            if 'actor' in rule and len(metadata_mixed.actor) > maxlen:
+                rule = rule.replace("actor", repr(short_actor))
+            return eval(rule, dict(md, title=short_title, actor=short_actor))
+
+        extra_folder = _apply_short(rule_folder)
+        extra_name = _apply_short(rule_name)
 
         # 清理和验证生成的路径
         # 移除路径中的非法字符
@@ -546,6 +555,29 @@ def celery_scrapping(self, file_path, scraping_dict, force_refresh=False):
         extra_folder = extra_folder.lstrip('/\\.')
         # 替换路径遍历字符
         extra_folder = extra_folder.replace('..', '_')
+
+        # 最终字节长度兜底：Linux 多数文件系统单路径分量上限 255 字节，
+        # 日文/中文 UTF-8 每字 3 字节，必须按字节而非字符数截断。
+        # 留 8 字节余量给扩展名（.nfo/.jpg/.png）和 -CD1 之类的后缀。
+        MAX_NAME_BYTES = 240
+        MAX_FOLDER_BYTES = 240
+
+        def _truncate_bytes(text: str, max_bytes: int) -> str:
+            """按字节长度截断，避免切到 UTF-8 多字节字符中间"""
+            encoded = text.encode('utf-8')
+            if len(encoded) <= max_bytes:
+                return text
+            # 从 max_bytes 往回找完整的 UTF-8 字符边界
+            cut = max_bytes
+            while cut > 0 and (encoded[cut] & 0xC0) == 0x80:
+                cut -= 1
+            return encoded[:cut].decode('utf-8', errors='ignore')
+
+        extra_name = _truncate_bytes(extra_name, MAX_NAME_BYTES)
+        # folder 可能是 a/b/c 多段，逐段截断
+        extra_folder = '/'.join(
+            _truncate_bytes(seg, MAX_FOLDER_BYTES) for seg in extra_folder.split('/')
+        )
 
         metadata_mixed.extra_folder = extra_folder
         metadata_mixed.extra_filename = extra_name
