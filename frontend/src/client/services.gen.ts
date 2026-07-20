@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { LoginAccessTokenData, LoginAccessTokenResponse, ReadUsersData, ReadUsersResponse, CreateUserData, CreateUserResponse, ReadUserMeResponse, DeleteUserMeResponse, UpdateUserMeData, UpdateUserMeResponse, UpdatePasswordMeData, UpdatePasswordMeResponse, RegisterUserData, RegisterUserResponse, ReadUserByIdData, ReadUserByIdResponse, UpdateUserData, UpdateUserResponse, DeleteUserData, DeleteUserResponse, RunTransferTaskData, RunTransferTaskResponse, GetAllTasksStatusData, GetAllTasksStatusResponse, CleanupRunningTasksResponse, GetAllTaskConfigsData, GetAllTaskConfigsResponse, CreateTaskConfigData, CreateTaskConfigResponse, UpdateTaskConfigData, UpdateTaskConfigResponse, DeleteTaskConfigData, DeleteTaskConfigResponse, GetAllConfigsData, GetAllConfigsResponse, CreateConfigData, CreateConfigResponse, UpdateConfigData, UpdateConfigResponse, DeleteConfigData, DeleteConfigResponse, GetRecordsData, GetRecordsResponse, UpdateRecordData, UpdateRecordResponse, UpdateTopFolderData, UpdateTopFolderResponse, UpdateSeasonData, UpdateSeasonResponse, DeleteRecordsData, DeleteRecordsResponse, RetryRecordsData, RetryRecordsResponse, GetTransRecordsData, GetTransRecordsResponse, CreateMetadataData, CreateMetadataResponse, GetMetadataData, GetMetadataResponse, UpdateMetadataData, UpdateMetadataResponse, DeleteMetadataData, DeleteMetadataResponse, GetMediaItemsData, GetMediaItemsResponse, CreateMediaItemData, CreateMediaItemResponse, GetMediaItemData, GetMediaItemResponse, UpdateMediaItemData, UpdateMediaItemResponse, DeleteMediaItemData, DeleteMediaItemResponse, CleanMediaItemResponse, RunImportNfoData, RunImportNfoResponse, RunEmbyScanData, RunEmbyScanResponse, SyncRecordPathData, SyncRecordPathResponse, SyncEmbyWatchHistoryData, SyncEmbyWatchHistoryResponse, CleanupDataData, CleanupDataResponse, GetProxySettingsResponse, UpdateProxySettingsData, UpdateProxySettingsResponse, GetEmbySettingsResponse, UpdateEmbySettingsData, UpdateEmbySettingsResponse, TestEmbyConnectionData, TestEmbyConnectionResponse, GetJellyfinSettingsResponse, UpdateJellyfinSettingsData, UpdateJellyfinSettingsResponse, TestJellyfinConnectionData, TestJellyfinConnectionResponse, GetTransmissionSettingsResponse, UpdateTransmissionSettingsData, UpdateTransmissionSettingsResponse, TestTransmissionConnectionData, TestTransmissionConnectionResponse, GetParseBlacklistResponse, UpdateParseBlacklistData, UpdateParseBlacklistResponse, PreviewParseBlacklistData, PreviewParseBlacklistResponse, GetImageByQueryData, GetImageByQueryResponse, UploadImageData, UploadImageResponse, GetPosterData, GetPosterResponse, ListDirectoryData, ListDirectoryResponse, HealthCheckResponse } from './types.gen';
+import type { LoginAccessTokenData, LoginAccessTokenResponse, ReadUsersData, ReadUsersResponse, CreateUserData, CreateUserResponse, ReadUserMeResponse, DeleteUserMeResponse, UpdateUserMeData, UpdateUserMeResponse, UpdatePasswordMeData, UpdatePasswordMeResponse, RegisterUserData, RegisterUserResponse, ReadUserByIdData, ReadUserByIdResponse, UpdateUserData, UpdateUserResponse, DeleteUserData, DeleteUserResponse, RunTransferTaskData, RunTransferTaskResponse, GetAllTasksStatusData, GetAllTasksStatusResponse, CleanupRunningTasksResponse, GetAllTaskConfigsData, GetAllTaskConfigsResponse, CreateTaskConfigData, CreateTaskConfigResponse, UpdateTaskConfigData, UpdateTaskConfigResponse, DeleteTaskConfigData, DeleteTaskConfigResponse, GetAllConfigsData, GetAllConfigsResponse, CreateConfigData, CreateConfigResponse, UpdateConfigData, UpdateConfigResponse, DeleteConfigData, DeleteConfigResponse, GetRecordsData, GetRecordsResponse, UpdateRecordData, UpdateRecordResponse, UpdateTopFolderData, UpdateTopFolderResponse, UpdateSeasonData, UpdateSeasonResponse, DeleteRecordsData, DeleteRecordsResponse, RetryRecordsData, RetryRecordsResponse, GetTransRecordsData, GetTransRecordsResponse, GetLatestScrapeLogData, GetLatestScrapeLogResponse, GetScrapeLogsData, GetScrapeLogsResponse, CreateMetadataData, CreateMetadataResponse, GetMetadataData, GetMetadataResponse, UpdateMetadataData, UpdateMetadataResponse, DeleteMetadataData, DeleteMetadataResponse, GetMediaItemsData, GetMediaItemsResponse, CreateMediaItemData, CreateMediaItemResponse, GetMediaItemData, GetMediaItemResponse, UpdateMediaItemData, UpdateMediaItemResponse, DeleteMediaItemData, DeleteMediaItemResponse, CleanMediaItemResponse, RunImportNfoData, RunImportNfoResponse, RunEmbyScanData, RunEmbyScanResponse, SyncRecordPathData, SyncRecordPathResponse, SyncEmbyWatchHistoryData, SyncEmbyWatchHistoryResponse, CleanupDataData, CleanupDataResponse, GetProxySettingsResponse, UpdateProxySettingsData, UpdateProxySettingsResponse, GetEmbySettingsResponse, UpdateEmbySettingsData, UpdateEmbySettingsResponse, TestEmbyConnectionData, TestEmbyConnectionResponse, GetJellyfinSettingsResponse, UpdateJellyfinSettingsData, UpdateJellyfinSettingsResponse, TestJellyfinConnectionData, TestJellyfinConnectionResponse, GetTransmissionSettingsResponse, UpdateTransmissionSettingsData, UpdateTransmissionSettingsResponse, TestTransmissionConnectionData, TestTransmissionConnectionResponse, GetParseBlacklistResponse, UpdateParseBlacklistData, UpdateParseBlacklistResponse, PreviewParseBlacklistData, PreviewParseBlacklistResponse, GetImageByQueryData, GetImageByQueryResponse, UploadImageData, UploadImageResponse, GetPosterData, GetPosterResponse, ListDirectoryData, ListDirectoryResponse, HealthCheckResponse } from './types.gen';
 
 export class LoginService {
     /**
@@ -668,7 +668,54 @@ export class RecordService {
             }
         });
     }
-    
+
+    /**
+     * Get Latest Scrape Log
+     * 获取某条 record 最近一次的 scrape_log 记录
+     * @param data The data for the request.
+     * @param data.recordId
+     * @returns ScrapeLogPublic Successful Response
+     * @throws ApiError
+     */
+    public static getLatestScrapeLog(data: GetLatestScrapeLogData): CancelablePromise<GetLatestScrapeLogResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/records/{record_id}/scrape-log',
+            path: {
+                record_id: data.recordId
+            },
+            errors: {
+                404: 'Not Found',
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Get Scrape Logs
+     * 获取某条 record 的 scrape_log 历史列表
+     * @param data The data for the request.
+     * @param data.recordId
+     * @param data.limit
+     * @returns ScrapeLogPublicList Successful Response
+     * @throws ApiError
+     */
+    public static getScrapeLogs(data: GetScrapeLogsData): CancelablePromise<GetScrapeLogsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/records/{record_id}/scrape-logs',
+            path: {
+                record_id: data.recordId
+            },
+            query: {
+                limit: data.limit
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
 }
 
 export class MetadataService {

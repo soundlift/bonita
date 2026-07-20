@@ -35,6 +35,9 @@ class TransferConfig(Base):
     sc_enabled = Column(Boolean, default=False, comment="启用刮削")
     sc_id = Column(Integer, default=0, comment="使用的刮削配置")
 
+    # 自动扫描时是否跳过 success=True 的记录（重试路径 force_refresh=True 不受此开关影响）
+    skip_on_success = Column(Boolean, default=True, server_default='1', comment="扫描时是否跳过已成功记录")
+
 
 class CeleryTask(Base):
     """

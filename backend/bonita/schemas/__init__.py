@@ -9,3 +9,4 @@ from .metadata import *
 from .system import *
 from .mediaitem import *
 from .file_browser import *
+from .scrape_log import *

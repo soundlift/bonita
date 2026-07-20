@@ -10,7 +10,9 @@ const { t } = useI18n() // 导入国际化工具函数
 
 const searchQuery = ref("")
 const taskIdQuery = ref("")
-const successFilter = ref<boolean | null>(null)
+const activeTab = ref<'pending' | 'done'>('pending')
+const scrapeLogDrawerOpen = ref(false)
+const currentScrapeLogRecordId = ref<number | null>(null)
 const searchTimeout = ref<number | null>(null)
 const selected = ref<number[]>([])
 const tagColorMap = {
@@ -21,13 +23,6 @@ const tagColorMap = {
 // localStorage 持久化
 const STORAGE_KEY = "records-view-settings"
 let settingsLoaded = false
-
-// 状态筛选选项
-const statusOptions = computed(() => [
-  { value: null, title: t("pages.records.allStatus") },
-  { value: true, title: t("pages.records.successStatus") },
-  { value: false, title: t("pages.records.failedStatus") },
-])
 
 // 刷新相关变量
 const autoRefresh = ref(true) // 是否自动刷新
@@ -256,10 +251,8 @@ const loadData = async (
     searchParams.search = searchQuery.value.trim()
   }
 
-  // 如果有状态筛选，则添加到搜索参数
-  if (successFilter.value !== null) {
-    searchParams.success = successFilter.value
-  }
+  // 根据 activeTab 决定 success 参数：pending -> false (IS NOT TRUE), done -> true
+  searchParams.success = activeTab.value === 'pending' ? false : true
 
   // 添加排序参数
   if (sortBy.value.length > 0) {
@@ -334,7 +327,7 @@ const manualRefresh = async () => {
 const saveSettings = () => {
   try {
     const settings = {
-      successFilter: successFilter.value,
+      activeTab: activeTab.value,
       visibleColumnKeys: visibleColumnKeys.value,
       sortBy: sortBy.value,
       itemsPerPage: recordStore.itemsPerPage,
@@ -351,8 +344,13 @@ const loadSettings = () => {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return
     const settings = JSON.parse(raw)
-    if (settings.successFilter !== undefined) {
-      successFilter.value = settings.successFilter
+    // 迁移旧字段 successFilter -> activeTab (一次性)
+    if ('successFilter' in settings) {
+      const old = settings.successFilter
+      activeTab.value = old === true ? 'done' : 'pending'
+      delete settings.successFilter
+    } else if (typeof settings.activeTab === 'string' && (settings.activeTab === 'pending' || settings.activeTab === 'done')) {
+      activeTab.value = settings.activeTab
     }
     if (Array.isArray(settings.visibleColumnKeys) && settings.visibleColumnKeys.length > 0) {
       // 只保留有效的 key，确保名称列始终在内
@@ -416,7 +414,7 @@ const confirmRetry = async () => {
 }
 
 // 更新 watch 函数以实现搜索功能，添加防抖
-watch([searchQuery, taskIdQuery, successFilter], () => {
+watch([searchQuery, taskIdQuery, activeTab], () => {
   // 清除之前的定时器
   if (searchTimeout.value) {
     clearTimeout(searchTimeout.value)
@@ -431,7 +429,7 @@ watch([searchQuery, taskIdQuery, successFilter], () => {
 
 // 持久化视图设置（在 settings 加载完成后才激活）
 watch(
-  [successFilter, visibleColumnKeys, sortBy],
+  [activeTab, visibleColumnKeys, sortBy],
   () => {
     if (settingsLoaded) {
       saveSettings()
@@ -453,8 +451,12 @@ watch(
 const handleClearSearch = () => {
   searchQuery.value = ""
   taskIdQuery.value = ""
-  successFilter.value = null
   loadData(1, recordStore.itemsPerPage)
+}
+
+const openScrapeLogDrawer = (item: any) => {
+  currentScrapeLogRecordId.value = item.transfer_record.id
+  scrapeLogDrawerOpen.value = true
 }
 
 // 处理排序变化
@@ -489,6 +491,17 @@ onMounted(() => {
     {{ t('pages.records.title') }}
   </p>
   <VCard>
+    <v-tabs v-model="activeTab" color="primary" density="comfortable">
+      <v-tab value="pending">
+        <v-icon start>mdi-alert-circle-outline</v-icon>
+        {{ t('pages.records.tabs.pending') }}
+      </v-tab>
+      <v-tab value="done">
+        <v-icon start>mdi-check-circle-outline</v-icon>
+        {{ t('pages.records.tabs.done') }}
+      </v-tab>
+    </v-tabs>
+    <v-divider />
     <div class="search-toolbar px-4 py-4">
       <div class="d-flex align-center justify-space-between flex-wrap gap-4">
         <div class="search-fields d-flex gap-4 align-center flex-grow-1 flex-wrap">
@@ -499,10 +512,6 @@ onMounted(() => {
           <v-text-field v-model="taskIdQuery" :placeholder="t('pages.records.filterTaskId')" hide-details density="comfortable"
             class="task-id-input" prepend-inner-icon="mdi-pound" clearable type="number"
             @click:clear="taskIdQuery = ''; loadData(1, recordStore.itemsPerPage)" />
-
-          <v-select v-model="successFilter" :items="statusOptions" item-title="title" item-value="value"
-            :placeholder="t('pages.records.statusFilter')" hide-details density="comfortable"
-            class="status-select" prepend-inner-icon="mdi-filter-variant" clearable />
         </div>
         
         <div class="d-flex align-center gap-2">
@@ -562,7 +571,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="search-filters mt-2 mb-1 d-flex flex-wrap align-center gap-2" v-if="searchQuery || taskIdQuery || successFilter !== null">
+      <div class="search-filters mt-2 mb-1 d-flex flex-wrap align-center gap-2" v-if="searchQuery || taskIdQuery">
         <v-chip v-if="searchQuery" color="primary" size="default" variant="elevated" class="search-chip">
           <v-icon start size="small" class="mr-1">mdi-magnify</v-icon>
           {{ t('pages.records.nameFilter') }}: {{ searchQuery }}
@@ -579,15 +588,7 @@ onMounted(() => {
           </template>
         </v-chip>
 
-        <v-chip v-if="successFilter !== null" color="success" size="default" variant="elevated" class="search-chip">
-          <v-icon start size="small" class="mr-1">mdi-filter-variant</v-icon>
-          {{ t('pages.records.statusFilter') }}: {{ successFilter ? t('pages.records.successStatus') : t('pages.records.failedStatus') }}
-          <template v-slot:append>
-            <v-icon size="small" @click="successFilter = null">mdi-close</v-icon>
-          </template>
-        </v-chip>
-
-        <v-btn v-if="searchQuery || taskIdQuery || successFilter !== null" icon="mdi-close-circle" size="small" color="error" variant="text"
+        <v-btn v-if="searchQuery || taskIdQuery" icon="mdi-close-circle" size="small" color="error" variant="text"
           @click="handleClearSearch" class="ml-1 clear-all-btn">
           <v-tooltip activator="parent" location="top">{{ t('pages.records.clearFilters') }}</v-tooltip>
         </v-btn>
@@ -704,6 +705,10 @@ onMounted(() => {
       <!-- 操作列 -->
       <template v-slot:item.actions="{ item }">
         <div class="d-flex align-center gap-2">
+          <VBtn size="small" variant="text" @click="openScrapeLogDrawer(item)">
+            <VIcon icon="mdi-file-document-outline" start />
+            {{ t('pages.records.viewScrapeLog') }}
+          </VBtn>
           <VBtn type="submit" size="small" @click="showSelectedRecord(item)">
             <VIcon icon="bx-edit-alt" />
           </VBtn>
@@ -777,6 +782,8 @@ onMounted(() => {
       </VCardActions>
     </VCard>
   </VDialog>
+
+  <ScrapeLogDrawer v-model="scrapeLogDrawerOpen" :record-id="currentScrapeLogRecordId" />
 </template>
 
 <style scoped>
@@ -820,6 +827,10 @@ onMounted(() => {
 }
 
 .search-toolbar {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.v-tabs {
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
 

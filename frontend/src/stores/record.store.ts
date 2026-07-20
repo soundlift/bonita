@@ -1,4 +1,4 @@
-import { type RecordPublic, RecordService } from "@/client"
+import { type RecordPublic, type ScrapeLogPublic, RecordService } from "@/client"
 import { useToastStore } from "./toast.store"
 
 import { defineStore } from "pinia"
@@ -12,6 +12,7 @@ export const useRecordStore = defineStore("record-store", {
     currentPage: 1,
     itemsPerPage: 10,
     loading: false,
+    latestScrapeLog: undefined as ScrapeLogPublic | undefined,
   }),
   actions: {
     async getRecords(
@@ -132,6 +133,30 @@ export const useRecordStore = defineStore("record-store", {
       } catch (error) {
         console.error("批量重试失败:", error)
         toast.error("批量重试失败")
+        throw error
+      }
+    },
+    async fetchLatestScrapeLog(recordId: number): Promise<ScrapeLogPublic | undefined> {
+      try {
+        const log = await RecordService.getLatestScrapeLog({ recordId })
+        this.latestScrapeLog = log
+        return log
+      } catch (error: any) {
+        // Propagate 404 so caller can show empty state
+        if (error?.status === 404) {
+          this.latestScrapeLog = undefined
+          throw error
+        }
+        console.error("获取刮削日志失败:", error)
+        throw error
+      }
+    },
+    async fetchScrapeLogs(recordId: number, limit = 20) {
+      try {
+        const response = await RecordService.getScrapeLogs({ recordId, limit })
+        return response
+      } catch (error) {
+        console.error("获取刮削日志历史失败:", error)
         throw error
       }
     },

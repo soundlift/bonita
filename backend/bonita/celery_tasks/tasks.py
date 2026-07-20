@@ -26,6 +26,10 @@ from bonita.modules.media_service.sync import sync_emby_history
 from bonita.celery_tasks.decorators import manage_celery_task
 from bonita.services.celery_service import TaskProgressTracker
 from bonita.services.setting_service import SettingService
+from bonita.services.record_service import RecordService
+from bonita.utils.logger import (
+    set_scrape_context, get_scrape_log_handler,
+)
 
 
 # 创建信号量，最多允许X任务同时执行
@@ -189,6 +193,14 @@ def celery_transfer_group(self, task_json, full_path, isEntry=False, force_refre
                 if record.ignored:
                     logger.info("      ⊘ 已忽略")
                     continue
+                # skip_on_success：自动扫描（force_refresh=False）且任务配置开启时，跳过已成功记录
+                if (
+                    not force_refresh
+                    and getattr(task_info, 'skip_on_success', True)
+                    and record.success is True
+                ):
+                    logger.info(f"      ⊘ 已成功且配置跳过，跳过: {original_file.filename}")
+                    continue
                 record.task_id = task_info.id
                 record.success = None
                 # 记录源文件大小
@@ -204,184 +216,214 @@ def celery_transfer_group(self, task_json, full_path, isEntry=False, force_refre
                             os.remove(record.destpath)
                         except OSError as e:
                             logger.warning(f"      ⊘ 删除旧目标文件失败: {e}")
-                if task_info.sc_enabled:
-                    logger.info("      → 刮削模式")
-                    scraping_conf = session.query(ScrapingConfig).filter(ScrapingConfig.id == task_info.sc_id).first()
-                    if not scraping_conf:
-                        logger.error("      ✗ 刮削配置未找到")
-                        record.success = False
-                        continue
-                    # ===== 状态: PENDING → 刮削 =====
-                    scraping_task = celery_scrapping.apply(args=[original_file.full_path, scraping_conf.to_dict(), force_refresh])
-                    with allow_join_result():
-                        metabase_json = scraping_task.get()
-                    if not metabase_json:
-                        logger.error("      ✗ 刮削失败，保留源文件")
-                        record.success = False
-                        continue
-                    metamixed = schemas.MetadataMixed.model_validate(metabase_json)
 
-                    # 验证结果路径在 output_folder 下，例如：extra_folder 不能"/"开头导致join失败
-                    output_folder = os.path.abspath(os.path.join(task_info.output_folder, metamixed.extra_folder))
-                    base_output = os.path.abspath(task_info.output_folder)
-                    if not output_folder.startswith(base_output):
-                        logger.error("      ✗ 安全检查失败，使用基础目录")
-                        output_folder = base_output
-                    if not os.path.exists(output_folder):
-                        os.makedirs(output_folder)
+                # 创建 scrape_log 记录，设置上下文供 ScrapeLogHandler 采集
+                record_service = RecordService(session)
+                scrape_log = record_service.create_scrape_log(
+                    record_id=record.id, celery_task_id=self.request.id or "",
+                )
+                scrape_log_id = scrape_log.id
+                set_scrape_context(self.request.id or "", record.id)
+                try:
+                    if task_info.sc_enabled:
+                        logger.info("      → 刮削模式")
+                        scraping_conf = session.query(ScrapingConfig).filter(ScrapingConfig.id == task_info.sc_id).first()
+                        if not scraping_conf:
+                            logger.error("      ✗ 刮削配置未找到")
+                            record.success = False
+                            continue
+                        # ===== 状态: PENDING → 刮削 =====
+                        scraping_task = celery_scrapping.apply(args=[original_file.full_path, scraping_conf.to_dict(), force_refresh])
+                        with allow_join_result():
+                            metabase_json = scraping_task.get()
+                        if not metabase_json:
+                            logger.error("      ✗ 刮削失败，保留源文件")
+                            record.success = False
+                            continue
+                        metamixed = schemas.MetadataMixed.model_validate(metabase_json)
 
-                    # ===== 状态: PENDING → AUX_READY =====
-                    # NFO 写入前置：本地 I/O，失败说明目录不可写，阻断转移保留源文件
-                    try:
-                        process_nfo_file(output_folder, metamixed.extra_filename, metamixed.__dict__)
-                    except Exception as nfo_err:
-                        logger.error(f"      ✗ NFO 写入失败，阻断转移保留源文件: {nfo_err}")
-                        record.success = False
-                        continue
+                        # 验证结果路径在 output_folder 下，例如：extra_folder 不能"/"开头导致join失败
+                        output_folder = os.path.abspath(os.path.join(task_info.output_folder, metamixed.extra_folder))
+                        base_output = os.path.abspath(task_info.output_folder)
+                        if not output_folder.startswith(base_output):
+                            logger.error("      ✗ 安全检查失败，使用基础目录")
+                            output_folder = base_output
+                        if not os.path.exists(output_folder):
+                            os.makedirs(output_folder)
 
-                    # 尝试下载封面，最多重试3次
-                    proxy = get_active_proxy(session)
-                    cache_cover_filepath = None
-                    cover_url = metamixed.cover
-                    retry_count = 0
-                    max_retries = 3
-                    used_sources = {metamixed.site} if metamixed.site else set()
-                    extrafanart_list = []
-
-                    # 收集首次刮削拿到的 extrafanart
-                    raw_ef = metamixed.extrafanart or ''
-                    if raw_ef:
-                        ef_items = raw_ef.split(',') if isinstance(raw_ef, str) else raw_ef
-                        extrafanart_list = [u.strip() for u in ef_items if u.strip()]
-
-                    while retry_count < max_retries:
+                        # ===== 状态: PENDING → AUX_READY =====
+                        # NFO 写入前置：本地 I/O，失败说明目录不可写，阻断转移保留源文件
                         try:
-                            cache_cover_filepath = process_cached_file(session, metamixed.cover, metamixed.number)
-                            break
-                        except Exception as e:
-                            retry_count += 1
-                            logger.warning(f"      ✗ 封面下载失败 (尝试 {retry_count}/{max_retries}): {cover_url} — {e}")
-                            if retry_count >= max_retries:
+                            process_nfo_file(output_folder, metamixed.extra_filename, metamixed.__dict__)
+                        except Exception as nfo_err:
+                            logger.error(f"      ✗ NFO 写入失败，阻断转移保留源文件: {nfo_err}")
+                            record.success = False
+                            continue
+
+                        # 尝试下载封面，最多重试3次
+                        proxy = get_active_proxy(session)
+                        cache_cover_filepath = None
+                        cover_url = metamixed.cover
+                        retry_count = 0
+                        max_retries = 3
+                        used_sources = {metamixed.site} if metamixed.site else set()
+                        extrafanart_list = []
+
+                        # 收集首次刮削拿到的 extrafanart
+                        raw_ef = metamixed.extrafanart or ''
+                        if raw_ef:
+                            ef_items = raw_ef.split(',') if isinstance(raw_ef, str) else raw_ef
+                            extrafanart_list = [u.strip() for u in ef_items if u.strip()]
+
+                        while retry_count < max_retries:
+                            try:
+                                cache_cover_filepath = process_cached_file(session, metamixed.cover, metamixed.number)
                                 break
-                            # 用其他源重新刮削获取封面 URL
-                            all_sources = scraping_conf.scraping_sites.split(',') if scraping_conf.scraping_sites else []
-                            remaining_sources = [s.strip() for s in all_sources if s.strip() and s.strip() not in used_sources]
-                            if not remaining_sources:
-                                logger.warning("      ⊘ 没有可用源可继续尝试")
+                            except Exception as e:
+                                retry_count += 1
+                                logger.warning(f"      ✗ 封面下载失败 (尝试 {retry_count}/{max_retries}): {cover_url} — {e}")
+                                if retry_count >= max_retries:
+                                    break
+                                # 用其他源重新刮削获取封面 URL
+                                all_sources = scraping_conf.scraping_sites.split(',') if scraping_conf.scraping_sites else []
+                                remaining_sources = [s.strip() for s in all_sources if s.strip() and s.strip() not in used_sources]
+                                if not remaining_sources:
+                                    logger.warning("      ⊘ 没有可用源可继续尝试")
+                                    break
+                                # 指定第一个未用过的源重新刮削
+                                fallback_json = scraping(
+                                    metamixed.number,
+                                    sources=','.join(remaining_sources[:1]),
+                                    specifiedsource="",
+                                    specifiedurl="",
+                                    proxy=proxy
+                                )
+                                if fallback_json and fallback_json.get('cover'):
+                                    new_site = fallback_json.get('source', '')
+                                    if new_site:
+                                        used_sources.add(new_site)
+                                    # 收集 extrafanart
+                                    ef_raw = fallback_json.get('extrafanart')
+                                    if ef_raw:
+                                        ef_items = ef_raw.split(',') if isinstance(ef_raw, str) else ef_raw
+                                        for u in ef_items:
+                                            u = u.strip()
+                                            if u and u not in extrafanart_list:
+                                                extrafanart_list.append(u)
+                                    new_cover = fallback_json.get('cover')
+                                    if new_cover and new_cover != cover_url:
+                                        cover_url = new_cover
+                                        continue
                                 break
-                            # 指定第一个未用过的源重新刮削
-                            fallback_json = scraping(
-                                metamixed.number,
-                                sources=','.join(remaining_sources[:1]),
-                                specifiedsource="",
-                                specifiedurl="",
-                                proxy=proxy
-                            )
-                            if fallback_json and fallback_json.get('cover'):
-                                new_site = fallback_json.get('source', '')
-                                if new_site:
-                                    used_sources.add(new_site)
-                                # 收集 extrafanart
-                                ef_raw = fallback_json.get('extrafanart')
-                                if ef_raw:
-                                    ef_items = ef_raw.split(',') if isinstance(ef_raw, str) else ef_raw
-                                    for u in ef_items:
-                                        u = u.strip()
-                                        if u and u not in extrafanart_list:
-                                            extrafanart_list.append(u)
-                                new_cover = fallback_json.get('cover')
-                                if new_cover and new_cover != cover_url:
-                                    cover_url = new_cover
-                                    continue
-                            break
 
-                    # 全部重试失败，降级到 extrafanart
-                    if cache_cover_filepath is None and extrafanart_list:
-                        ef_url = extrafanart_list[0]
-                        logger.info(f"      → 使用 extrafanart 作为封面: {ef_url}")
-                        try:
-                            cache_cover_filepath = download_file(ef_url, metamixed.number, proxy)
-                            cover_url = ef_url
-                        except Exception as e:
-                            logger.warning(f"      ⊘ extrafanart 下载失败: {e}")
+                        # 全部重试失败，降级到 extrafanart
+                        if cache_cover_filepath is None and extrafanart_list:
+                            ef_url = extrafanart_list[0]
+                            logger.info(f"      → 使用 extrafanart 作为封面: {ef_url}")
+                            try:
+                                cache_cover_filepath = download_file(ef_url, metamixed.number, proxy)
+                                cover_url = ef_url
+                            except Exception as e:
+                                logger.warning(f"      ⊘ extrafanart 下载失败: {e}")
 
-                    # 更新 metadata_mixed 中的 cover 为实际使用的 URL，同时回写数据库
-                    if cover_url:
-                        metamixed.cover = cover_url
-                        metadata_record = session.query(Metadata).filter(
-                            Metadata.number == metamixed.number
-                        ).order_by(Metadata.id.desc()).first()
-                        if metadata_record:
-                            metadata_record.cover = cover_url
-                            session.commit()
+                        # 更新 metadata_mixed 中的 cover 为实际使用的 URL，同时回写数据库
+                        if cover_url:
+                            metamixed.cover = cover_url
+                            metadata_record = session.query(Metadata).filter(
+                                Metadata.number == metamixed.number
+                            ).order_by(Metadata.id.desc()).first()
+                            if metadata_record:
+                                metadata_record.cover = cover_url
+                                session.commit()
 
-                    # 有封面则处理封面图片，否则跳过
-                    pics = []
-                    if cache_cover_filepath:
-                        pics = process_cover(cache_cover_filepath, output_folder, metamixed.extra_filename, crop=metamixed.extra_crop)
-                        if scraping_conf.watermark_enabled:
-                            add_mark(pics, metamixed.tag, scraping_conf.watermark_location, scraping_conf.watermark_size)
+                        # 有封面则处理封面图片，否则跳过
+                        pics = []
+                        if cache_cover_filepath:
+                            pics = process_cover(cache_cover_filepath, output_folder, metamixed.extra_filename, crop=metamixed.extra_crop)
+                            if scraping_conf.watermark_enabled:
+                                add_mark(pics, metamixed.tag, scraping_conf.watermark_location, scraping_conf.watermark_size)
+                        else:
+                            logger.warning("      ⊘ 封面获取失败，跳过封面图片处理")
+                        # ===== 状态: AUX_READY → TRANSFERRED =====
+                        # 移动
+                        destpath = transSingleFile(original_file, output_folder,
+                                                   metamixed.extra_filename, task_info.operation)
+                        done_list.append(destpath)
+
+                        # ===== 状态: TRANSFERRED → VERIFIED =====
+                        if not verify_transfer(destpath, record.filesize):
+                            logger.error(f"      ✗ 转移校验失败，回滚清理目标半成品: {destpath}")
+                            rollback_transfer(destpath)
+                            record.success = False
+                            continue
+
+                        if record.destpath != destpath:
+                            # 如果新的路径和之前不同，则删除之前的文件
+                            if os.path.exists(record.destpath):
+                                os.remove(record.destpath)
+                        # ===== 状态: VERIFIED → COMMITTED =====
+                        # 更新
+                        record.destpath = destpath
+                        logger.info("      ✓ 刮削转移完成")
                     else:
-                        logger.warning("      ⊘ 封面获取失败，跳过封面图片处理")
-                    # ===== 状态: AUX_READY → TRANSFERRED =====
-                    # 移动
-                    destpath = transSingleFile(original_file, output_folder,
-                                               metamixed.extra_filename, task_info.operation)
-                    done_list.append(destpath)
+                        logger.info("      → 直接转移")
+                        target_file = TargetFileInfo(task_info.output_folder)
+                        if record.top_folder:
+                            target_file.force_update_top_folder(record.top_folder)
+                        # 如果 record 中定义了剧集信息，则使用 record 中的信息
+                        if record.isepisode:
+                            target_file.force_update_episode(record.isepisode, record.season, record.episode)
+                        # ===== 状态: AUX_READY → TRANSFERRED =====
+                        # 开始转移
+                        target_file = transferfile(original_file, target_file,
+                                                   optimize_name_tag=task_info.optimize_name, series_tag=is_series,
+                                                   file_list=waiting_list, linktype=task_info.operation)
+                        done_list.append(target_file.full_path)
 
-                    # ===== 状态: TRANSFERRED → VERIFIED =====
-                    if not verify_transfer(destpath, record.filesize):
-                        logger.error(f"      ✗ 转移校验失败，回滚清理目标半成品: {destpath}")
-                        rollback_transfer(destpath)
-                        record.success = False
-                        continue
+                        # ===== 状态: TRANSFERRED → VERIFIED =====
+                        if not verify_transfer(target_file.full_path, record.filesize):
+                            logger.error(f"      ✗ 转移校验失败，回滚清理目标半成品: {target_file.full_path}")
+                            rollback_transfer(target_file.full_path)
+                            record.success = False
+                            continue
 
-                    if record.destpath != destpath:
-                        # 如果新的路径和之前不同，则删除之前的文件
-                        if os.path.exists(record.destpath):
-                            os.remove(record.destpath)
-                    # ===== 状态: VERIFIED → COMMITTED =====
-                    # 更新
-                    record.destpath = destpath
-                    logger.info("      ✓ 刮削转移完成")
-                else:
-                    logger.info("      → 直接转移")
-                    target_file = TargetFileInfo(task_info.output_folder)
-                    if record.top_folder:
-                        target_file.force_update_top_folder(record.top_folder)
-                    # 如果 record 中定义了剧集信息，则使用 record 中的信息
-                    if record.isepisode:
-                        target_file.force_update_episode(record.isepisode, record.season, record.episode)
-                    # ===== 状态: AUX_READY → TRANSFERRED =====
-                    # 开始转移
-                    target_file = transferfile(original_file, target_file,
-                                               optimize_name_tag=task_info.optimize_name, series_tag=is_series,
-                                               file_list=waiting_list, linktype=task_info.operation)
-                    done_list.append(target_file.full_path)
-
-                    # ===== 状态: TRANSFERRED → VERIFIED =====
-                    if not verify_transfer(target_file.full_path, record.filesize):
-                        logger.error(f"      ✗ 转移校验失败，回滚清理目标半成品: {target_file.full_path}")
-                        rollback_transfer(target_file.full_path)
-                        record.success = False
-                        continue
-
-                    if record.destpath != target_file.full_path:
-                        # 如果新的路径和之前不同，则删除之前的文件
-                        if os.path.exists(record.destpath):
-                            os.remove(record.destpath)
-                    # ===== 状态: VERIFIED → COMMITTED =====
-                    # 更新
-                    record.isepisode = target_file.is_episode
-                    record.season = target_file.season_number
-                    record.episode = target_file.episode_number
-                    record.top_folder = target_file.top_folder
-                    record.second_folder = target_file.second_folder
-                    record.destpath = target_file.full_path
-                    logger.info("      ✓ 直接转移完成")
-                # 更新 record 状态
-                record.deleted = False
-                record.success = True
+                        if record.destpath != target_file.full_path:
+                            # 如果新的路径和之前不同，则删除之前的文件
+                            if os.path.exists(record.destpath):
+                                os.remove(record.destpath)
+                        # ===== 状态: VERIFIED → COMMITTED =====
+                        # 更新
+                        record.isepisode = target_file.is_episode
+                        record.season = target_file.season_number
+                        record.episode = target_file.episode_number
+                        record.top_folder = target_file.top_folder
+                        record.second_folder = target_file.second_folder
+                        record.destpath = target_file.full_path
+                        logger.info("      ✓ 直接转移完成")
+                    # 更新 record 状态
+                    record.deleted = False
+                    record.success = True
+                except Exception as scrape_exc:
+                    # 单条 record 处理异常：标记 scrape_log 为 interrupted，不中断整个任务
+                    logger.error(f"      ✗ 处理异常: {scrape_exc}")
+                    record.success = False
+                    record_service.update_scrape_log(
+                        scrape_log_id, status="interrupted", error_msg=str(scrape_exc)[:500]
+                    )
+                    raise
+                finally:
+                    # 关闭 scrape_log 生命周期：根据 record.success 决定终态
+                    _handler = get_scrape_log_handler()
+                    if _handler is not None:
+                        _handler.flush_for_record(record.id)
+                    if record.success is True:
+                        record_service.update_scrape_log(scrape_log_id, status="success")
+                    elif record.success is False:
+                        record_service.update_scrape_log(scrape_log_id, status="failed")
+                    # 保留策略：单 record 最多 20 条
+                    record_service.enforce_scrape_log_retention(record.id, keep=20)
+                    # 清空刮削上下文
+                    set_scrape_context("", None)
         except Exception as e:
             logger.error(e)
             # 异常中断时将当前 record 标记为失败，避免 success 停留在 None
@@ -655,6 +697,57 @@ def celery_import_nfo(self, folder_path, option):
     except Exception:
         logger.error("## [NFO导入] ✗ 失败: {str(e)}")
     return True
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3},
+             name='cleanup:scrape_logs')
+def celery_cleanup_scrape_logs(self, days: int = 30):
+    """清理过期的 scrape_log 记录。
+
+    删除 started_at 早于 N 天前的 scrape_log，但保留每条 record 最新一条 success 日志，
+    避免清空成功历史。
+
+    Args:
+        days: 保留天数（默认 30）
+    """
+    logger.info(f"## [清理 scrape_log] START - 清理 {days} 天前的日志")
+    from bonita.db.models.scrape_log import ScrapeLog
+    from datetime import datetime, timedelta
+
+    cutoff = datetime.now() - timedelta(days=days)
+    try:
+        session = SessionFactory()
+        # 查询所有过期日志
+        expired = session.query(ScrapeLog).filter(ScrapeLog.started_at < cutoff).all()
+        deleted = 0
+        protected = 0
+        # 按 record_id 分组，保护每组最新的 success（即使过期）
+        latest_success_ids = set()
+        for log in expired:
+            top_success = (
+                session.query(ScrapeLog)
+                .filter(ScrapeLog.record_id == log.record_id, ScrapeLog.status == 'success')
+                .order_by(ScrapeLog.started_at.desc())
+                .first()
+            )
+            if top_success is not None:
+                latest_success_ids.add(top_success.id)
+        for log in expired:
+            if log.id in latest_success_ids:
+                protected += 1
+                continue
+            session.delete(log)
+            deleted += 1
+        session.commit()
+        logger.info(
+            f"## [清理 scrape_log] END - 删除 {deleted} 条，保护最新成功 {protected} 条"
+        )
+        return {"deleted": deleted, "protected": protected, "cutoff": cutoff.isoformat()}
+    except Exception as e:
+        logger.error(f"## [清理 scrape_log] ✗ 失败: {str(e)}")
+        raise
+    finally:
+        session.close()
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3},

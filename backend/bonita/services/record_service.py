@@ -8,6 +8,7 @@ from sqlalchemy import or_, desc, asc
 
 from bonita.db.models.record import TransRecords
 from bonita.db.models.extrainfo import ExtraInfo
+from bonita.db.models.scrape_log import ScrapeLog
 from bonita.utils.filehelper import cleanFilebyFilter, cleanFolderWithoutSuffix, video_type
 
 logger = logging.getLogger(__name__)
@@ -67,8 +68,8 @@ class RecordService:
         if success is True:
             query = query.filter(TransRecords.success == True)
         elif success is False:
-            # 失败筛选包含 False 和 NULL（中断的记录）
-            query = query.filter(or_(TransRecords.success == False, TransRecords.success.is_(None)))
+            # 未刮削：返回所有 success IS NOT TRUE 的记录（False 与 NULL/中断）
+            query = query.filter(TransRecords.success.isnot(True))
 
         # 添加排序
         sort_field = getattr(TransRecords, sort_by, TransRecords.updatetime)
@@ -94,8 +95,8 @@ class RecordService:
         if success is True:
             count_query = count_query.filter(TransRecords.success == True)
         elif success is False:
-            # 失败筛选包含 False 和 NULL（中断的记录）
-            count_query = count_query.filter(or_(TransRecords.success == False, TransRecords.success.is_(None)))
+            # 未刮削：返回所有 success IS NOT TRUE 的记录（False 与 NULL/中断）
+            count_query = count_query.filter(TransRecords.success.isnot(True))
 
         count = count_query.count()
         return records, count
@@ -464,6 +465,129 @@ class RecordService:
         count = self.session.query(TransRecords).count()
 
         return trans_records, count
+
+    def get_latest_scrape_log(self, record_id: int) -> Optional[ScrapeLog]:
+        """获取某条 record 最近一次 scrape_log 记录
+
+        Args:
+            record_id: 关联的转移记录ID
+
+        Returns:
+            Optional[ScrapeLog]: 最近一条日志，无则 None
+        """
+        return (
+            self.session.query(ScrapeLog)
+            .filter(ScrapeLog.record_id == record_id)
+            .order_by(ScrapeLog.started_at.desc())
+            .first()
+        )
+
+    def get_scrape_logs(self, record_id: int, limit: int = 20) -> Tuple[List[ScrapeLog], int]:
+        """获取某条 record 的 scrape_log 历史
+
+        Args:
+            record_id: 关联的转移记录ID
+            limit: 返回条数上限（默认 20）
+
+        Returns:
+            Tuple[List[ScrapeLog], int]: 日志列表（按 started_at 倒序）与总数
+        """
+        base_query = self.session.query(ScrapeLog).filter(ScrapeLog.record_id == record_id)
+        count = base_query.count()
+        logs = (
+            base_query.order_by(ScrapeLog.started_at.desc()).limit(limit).all()
+        )
+        return logs, count
+
+    def create_scrape_log(self, record_id: int, celery_task_id: str = "") -> ScrapeLog:
+        """为指定 record 创建一条 running 状态的 scrape_log
+
+        Args:
+            record_id: 关联的转移记录ID
+            celery_task_id: Celery 任务ID
+
+        Returns:
+            ScrapeLog: 新建的日志记录
+        """
+        log = ScrapeLog(
+            record_id=record_id,
+            celery_task_id=celery_task_id or "",
+            status="running",
+            started_at=datetime.now(),
+            log_text="",
+            error_msg="",
+        )
+        self.session.add(log)
+        self.session.commit()
+        self.session.refresh(log)
+        return log
+
+    def update_scrape_log(
+        self,
+        scrape_log_id: int,
+        status: str,
+        log_text: Optional[str] = None,
+        error_msg: Optional[str] = None,
+    ) -> Optional[ScrapeLog]:
+        """更新 scrape_log 的状态与字段
+
+        Args:
+            scrape_log_id: 日志记录ID
+            status: 终态或中间态（running|success|failed|interrupted）
+            log_text: 若提供则覆盖 log_text
+            error_msg: 若提供则覆盖 error_msg
+
+        Returns:
+            Optional[ScrapeLog]: 更新后的记录，找不到则 None
+        """
+        log = self.session.get(ScrapeLog, scrape_log_id)
+        if not log:
+            return None
+        log.status = status
+        if log_text is not None:
+            log.log_text = log_text
+        if error_msg is not None:
+            log.error_msg = error_msg
+        if status in ("success", "failed", "interrupted"):
+            log.finished_at = datetime.now()
+        self.session.commit()
+        return log
+
+    def enforce_scrape_log_retention(self, record_id: int, keep: int = 20) -> int:
+        """对指定 record 实施 scrape_log 保留策略，删除超出的最旧记录
+
+        始终保留该 record 最新一条 success 日志（若存在），避免清空成功历史。
+
+        Args:
+            record_id: 关联的转移记录ID
+            keep: 保留条数
+
+        Returns:
+            int: 删除的条数
+        """
+        all_logs = (
+            self.session.query(ScrapeLog)
+            .filter(ScrapeLog.record_id == record_id)
+            .order_by(ScrapeLog.started_at.desc())
+            .all()
+        )
+        if len(all_logs) <= keep:
+            return 0
+
+        # 保护最新一条 success（如果它在 keep 之外）
+        latest_success = next((l for l in all_logs if l.status == "success"), None)
+        to_keep = set(item.id for item in all_logs[:keep])
+        if latest_success is not None:
+            to_keep.add(latest_success.id)
+
+        deleted = 0
+        for item in all_logs:
+            if item.id not in to_keep:
+                self.session.delete(item)
+                deleted += 1
+        if deleted:
+            self.session.commit()
+        return deleted
 
     def get_records_to_cleanup(self, force: bool = False) -> List[TransRecords]:
         """获取需要清理的记录（过期或标记为已删除源文件的记录）

@@ -281,6 +281,35 @@ export type RecordsPublic = {
     count: number;
 };
 
+export type ScrapeLogPublic = {
+    id: number;
+    record_id: number;
+    celery_task_id?: string | null;
+    status?: string;
+    started_at?: string | null;
+    finished_at?: string | null;
+    log_text?: string | null;
+    error_msg?: string | null;
+};
+
+export type ScrapeLogPublicList = {
+    data: Array<ScrapeLogPublic>;
+    count: number;
+};
+
+export type GetLatestScrapeLogData = {
+    recordId: number;
+};
+
+export type GetLatestScrapeLogResponse = ScrapeLogPublic;
+
+export type GetScrapeLogsData = {
+    recordId: number;
+    limit?: number;
+};
+
+export type GetScrapeLogsResponse = ScrapeLogPublicList;
+
 export type Response = {
     success?: boolean;
     message?: string | null;

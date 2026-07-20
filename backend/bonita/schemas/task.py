@@ -42,6 +42,7 @@ class TransferConfigBase(BaseModel):
     threads_num: Optional[int] = 1
     sc_enabled: bool = False
     sc_id: Optional[int] = None
+    skip_on_success: bool = True
 
 
 class TransferConfigPublic(TransferConfigBase):

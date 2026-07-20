@@ -22,7 +22,8 @@ def get_records(
     """ 获取记录信息 包含 ExtraInfo
     可以根据task_id进行精确过滤
     search参数可同时模糊匹配srcname和srcpath
-    success参数可以按状态过滤（True只返回成功，False只返回失败，None不过滤）
+    success参数可以按状态过滤：True 只返回成功记录；False 返回 success 不为 True 的记录（False 与 NULL/中断）；
+        None 不过滤，返回全部
     sort_by参数可以指定排序字段，默认按createtime排序
     sort_desc参数可以指定是否降序排序，默认为True
     """
@@ -190,3 +191,47 @@ def get_trans_records(session: SessionDep, skip: int = 0, limit: int = 100) -> A
 
     record_list = [schemas.TransferRecordPublic.model_validate(record) for record in trans_records]
     return schemas.TransferRecordsPublic(data=record_list, count=count)
+
+
+@router.get("/{record_id}/scrape-log", response_model=schemas.ScrapeLogPublic)
+def get_latest_scrape_log(session: SessionDep, record_id: int) -> Any:
+    """获取某条 record 最近一次的 scrape_log 记录
+
+    Args:
+        record_id: 转移记录ID
+
+    Returns:
+        ScrapeLogPublic: 最近一条刮削日志
+
+    Raises:
+        HTTPException: 404 当该 record 无任何 scrape_log 记录
+    """
+    record_service = RecordService(session)
+    log = record_service.get_latest_scrape_log(record_id)
+    if not log:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No scrape log found for record {record_id}",
+        )
+    return schemas.ScrapeLogPublic.model_validate(log)
+
+
+@router.get("/{record_id}/scrape-logs", response_model=schemas.ScrapeLogPublicList)
+def get_scrape_logs(
+    session: SessionDep,
+    record_id: int,
+    limit: int = 20,
+) -> Any:
+    """获取某条 record 的 scrape_log 历史列表
+
+    Args:
+        record_id: 转移记录ID
+        limit: 最多返回条数（默认 20）
+
+    Returns:
+        ScrapeLogPublicList: 按开始时间倒序的日志列表与总数
+    """
+    record_service = RecordService(session)
+    logs, count = record_service.get_scrape_logs(record_id, limit=limit)
+    data = [schemas.ScrapeLogPublic.model_validate(item) for item in logs]
+    return schemas.ScrapeLogPublicList(data=data, count=count)

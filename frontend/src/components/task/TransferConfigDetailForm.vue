@@ -183,6 +183,17 @@ async function handleSubmit() {
       <VCol cols="12">
         <VRow no-gutters>
           <VCol cols="12" md="3" class="row-label">
+            <label for="skip_on_success">{{ t('components.task.form.skipOnSuccess') }}</label>
+          </VCol>
+          <VCol cols="12" md="9">
+            <VCheckbox id="skip_on_success" v-model="currentTask.skip_on_success" />
+          </VCol>
+        </VRow>
+      </VCol>
+
+      <VCol cols="12">
+        <VRow no-gutters>
+          <VCol cols="12" md="3" class="row-label">
             <label for="clean_others">{{ t('components.task.form.cleanOthers') }}</label>
           </VCol>
           <VCol cols="12" md="9">

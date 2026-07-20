@@ -102,6 +102,12 @@ def create_celery():
             "schedule": 86400.0,  # 24 hours in seconds
             "args": (None, 30, 100),  # sources=None, days=30, limit=100
         },
+        # Cleanup expired scrape_log entries daily (keep last success per record)
+        "cleanup-scrape-logs-daily": {
+            "task": "cleanup:scrape_logs",
+            "schedule": 86400.0,  # 24 hours in seconds
+            "args": (30,),  # days=30
+        },
     }
 
     return celery
