@@ -48,7 +48,7 @@ def update_config(
     config = session.get(ScrapingConfig, id)
     if not config:
         raise HTTPException(status_code=404, detail="配置未找到")
-    update_dict = config_in.model_dump(exclude_unset=True)
+    update_dict = config_in.model_dump(exclude_unset=True, exclude={"id"})
     config.update(session, update_dict)
     session.commit()
     session.refresh(config)

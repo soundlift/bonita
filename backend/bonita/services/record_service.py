@@ -13,6 +13,11 @@ from bonita.utils.filehelper import cleanFilebyFilter, cleanFolderWithoutSuffix,
 
 logger = logging.getLogger(__name__)
 
+_ALLOWED_SORT_FIELDS_RECORDS = {
+    "updatetime", "createtime", "srcname", "srcpath",
+    "success", "ignored", "locked", "filesize",
+}
+
 
 class RecordService:
     """转移记录服务，提供对转移记录的业务逻辑操作"""
@@ -71,7 +76,9 @@ class RecordService:
             # 未刮削：返回所有 success IS NOT TRUE 的记录（False 与 NULL/中断）
             query = query.filter(TransRecords.success.isnot(True))
 
-        # 添加排序
+        # 添加排序（白名单校验，防止属性注入）
+        if sort_by not in _ALLOWED_SORT_FIELDS_RECORDS:
+            sort_by = "updatetime"
         sort_field = getattr(TransRecords, sort_by, TransRecords.updatetime)
         if sort_desc:
             query = query.order_by(desc(sort_field))

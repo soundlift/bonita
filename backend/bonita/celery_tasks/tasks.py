@@ -602,20 +602,43 @@ def celery_scrapping(self, file_path, scraping_dict, force_refresh=False):
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3},
              name='clean:clean_others')
-def celery_clean_others(self, root_path, done_list):
+def celery_clean_others(self, root_path, done_list=None):
+    """清理 output_folder 下不属于已知成功转移记录的视频文件。
+
+    done_list 参数保留以向后兼容，但清理逻辑改为基于 TransRecords 表查询。
+    """
     logger.info(f"## [清理任务] START - {root_path}")
+
+    # 从数据库查询该 output_folder 下已成功转移的文件路径
+    from bonita.db import SessionFactory
+    from bonita.db.models.record import TransRecords
+    known_paths = set()
+    try:
+        with SessionFactory() as session:
+            records = session.query(TransRecords.destpath).filter(
+                TransRecords.success == True,
+                TransRecords.destpath.isnot(None),
+                TransRecords.destpath != '',
+                TransRecords.destpath.like(f"{root_path}%"),
+            ).all()
+            known_paths = {r.destpath for r in records}
+    except Exception as e:
+        logger.error(f"  ⚠ 查询转移记录失败，跳过清理: {e}")
+        return []
 
     cleaned_files = []
     dest_list = findAllFilesWithSuffix(root_path, video_type)
     for dest in dest_list:
-        if dest not in done_list:
+        real_dest = os.path.realpath(dest)
+        if real_dest not in known_paths and dest not in known_paths:
             cleaned_files.append(dest)
+
     for torm in cleaned_files:
         logger.info(f"  ✗ 删除: {os.path.basename(torm)}")
         os.remove(torm)
     cleanFolderWithoutSuffix(root_path, video_type)
 
-    logger.info(f"## [清理任务] END - 删除 {len(cleaned_files)} 个文件")
+    logger.info(f"## [清理任务] END - 删除 {len(cleaned_files)} 个文件（已知成功记录: {len(known_paths)}）")
     return cleaned_files
 
 

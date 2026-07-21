@@ -14,7 +14,7 @@ from bonita.core import security
 router = APIRouter()
 
 
-async def verify_ws_token(websocket: WebSocket, token: str = Query(...)) -> schemas.TokenPayload:
+async def verify_ws_token(websocket: WebSocket, token: str) -> schemas.TokenPayload:
     """
     验证WebSocket连接的令牌
     """
@@ -173,20 +173,39 @@ log_manager = LogConnectionManager()
 
 
 @router.websocket("/logs")
-async def websocket_logs(websocket: WebSocket, token: str = Query(None)):
+async def websocket_logs(websocket: WebSocket):
     """
-    WebSocket接口，用于实时接收日志更新
-    需要有效的认证令牌
+    WebSocket接口，用于实时接收日志更新。
+    认证方式：连接建立后，客户端必须在 5 秒内发送第一条 JSON 消息 {"type": "auth", "token": "..."}
     """
-    # 验证token
+    await websocket.accept()
+
+    # 等待客户端发送认证消息（5 秒超时）
+    try:
+        auth_msg = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+    except asyncio.TimeoutError:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="认证超时")
+        return
+
+    # 解析认证消息
+    import json
+    try:
+        auth_data = json.loads(auth_msg)
+        token = auth_data.get("token", "")
+    except (json.JSONDecodeError, AttributeError):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="无效的认证消息格式")
+        return
+
     if not token:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="缺少 token")
         return
 
     token_data = await verify_ws_token(websocket, token)
     if not token_data:
         return  # 连接已在verify_ws_token中关闭
 
+    # 认证成功，发送确认
+    await websocket.send_json({"type": "auth", "status": "ok"})
     await log_manager.connect(websocket)
     try:
         while True:

@@ -62,8 +62,7 @@ class Settings(BaseSettings):
     CELERY_BROKER_DB_LOCATION: str = "./data/celery_broker.sqlite3"
     CELERY_BROKER_URL: str = os.environ.get("CELERY_BROKER_URL", f"sqla+sqlite:///{CELERY_BROKER_DB_LOCATION}")
     CELERY_RESULT_BACKEND: str = os.environ.get("CELERY_RESULT_BACKEND", f"db+sqlite:///{DATABASE_LOCATION}")
-    # 最大并发任务数, 受 worker 数量影响
-    MAX_CONCURRENT_TASKS: int = os.environ.get("MAX_CONCURRENT_TASKS", 5)
+    MAX_CONCURRENT_TASKS: int = int(os.environ.get("MAX_CONCURRENT_TASKS", "5"))
     # 日志
     LOGGING_FORMAT: str = "[%(asctime)s] %(levelname)s in %(module)s: PID:%(process)d TID:%(thread)d [%(task_id)s] %(message)s"
     LOGGING_LOCATION: str = "./data/bonita.log"

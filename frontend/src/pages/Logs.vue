@@ -150,6 +150,14 @@ const handleWebSocketMessage = (event: MessageEvent) => {
   try {
     const data = JSON.parse(event.data)
 
+    // 处理认证响应
+    if (data.type === "auth" && data.status === "ok") {
+      console.log("WebSocket认证成功")
+      wsConnectionStatus.value = "connected"
+      logStore.logs = []
+      return
+    }
+
     // 使用store方法处理日志
     logStore.handleWebSocketLogs(data)
 
@@ -191,8 +199,8 @@ const createWebSocketConnection = () => {
     ? new URL(import.meta.env.VITE_API_URL).host
     : window.location.host
 
-  // 构建WebSocket URL (不再添加过滤参数)
-  const wsUrl = `${protocol}//${host}/api/v1/ws/logs?token=${token}`
+  // 构建WebSocket URL（token 不放入 URL，改为连接后发送认证消息）
+  const wsUrl = `${protocol}//${host}/api/v1/ws/logs`
 
   // 创建WebSocket连接
   try {
@@ -201,10 +209,8 @@ const createWebSocketConnection = () => {
     // 设置事件处理器
     wsConnection.value.onmessage = handleWebSocketMessage
     wsConnection.value.onopen = () => {
-      console.log("WebSocket连接已建立")
-      wsConnectionStatus.value = "connected"
-      // 清空现有日志，只显示实时日志
-      logStore.logs = []
+      // 连接建立后立即发送认证消息
+      wsConnection.value.send(JSON.stringify({ type: "auth", token: token }))
     }
     wsConnection.value.onerror = (error) => {
       console.error("WebSocket错误", error)

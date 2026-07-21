@@ -10,6 +10,11 @@ from bonita import schemas
 
 router = APIRouter()
 
+_ALLOWED_SORT_FIELDS_MEDIAITEM = {
+    "updatetime", "createtime", "title", "number", "studio",
+    "director", "release", "year", "rating",
+}
+
 
 @router.get("/", response_model=schemas.MediaItemCollection)
 async def get_media_items(
@@ -100,7 +105,10 @@ async def get_media_items(
     # 获取总数
     count = query.count()
 
-    # 应用排序
+    # 应用排序（白名单校验，防止属性注入）
+    if sort_by not in _ALLOWED_SORT_FIELDS_MEDIAITEM:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"无效排序字段: {sort_by}")
     sort_column = getattr(MediaItem, sort_by, MediaItem.updatetime)
     query = query.order_by(desc(sort_column) if sort_desc else asc(sort_column))
 

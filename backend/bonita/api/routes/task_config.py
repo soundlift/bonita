@@ -55,7 +55,7 @@ def update_task_config(
     task_config = session.get(TransferConfig, id)
     if not task_config:
         raise HTTPException(status_code=404, detail="任务配置未找到")
-    update_dict = config_in.model_dump(exclude_unset=True)
+    update_dict = config_in.model_dump(exclude_unset=True, exclude={"id"})
     task_config.update(session, update_dict)
     session.commit()
     session.refresh(task_config)
