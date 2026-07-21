@@ -357,7 +357,7 @@ def celery_transfer_group(self, task_json, full_path, isEntry=False, force_refre
                             record.success = False
                             continue
 
-                        if record.destpath != destpath:
+                        if record.destpath and record.destpath != destpath:
                             # 如果新的路径和之前不同，则删除之前的文件
                             if os.path.exists(record.destpath):
                                 os.remove(record.destpath)
@@ -387,7 +387,7 @@ def celery_transfer_group(self, task_json, full_path, isEntry=False, force_refre
                             record.success = False
                             continue
 
-                        if record.destpath != target_file.full_path:
+                        if record.destpath and record.destpath != target_file.full_path:
                             # 如果新的路径和之前不同，则删除之前的文件
                             if os.path.exists(record.destpath):
                                 os.remove(record.destpath)

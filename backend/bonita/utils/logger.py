@@ -1,3 +1,4 @@
+import os
 import logging
 import threading
 import time
@@ -161,11 +162,16 @@ def init_log_config():
     """
     global _scrape_log_handler
 
+    # 解析日志路径为绝对路径，确保 uvicorn 和 Celery worker 写入同一文件
+    log_path = os.path.abspath(settings.LOGGING_LOCATION)
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    settings.LOGGING_LOCATION = log_path
+
     max_log_size = 5 * 1024 * 1024  # 5 MB
     backup_count = 5
     formatter = logging.Formatter(settings.LOGGING_FORMAT)
     file_handler = RotatingFileHandler(
-        settings.LOGGING_LOCATION,
+        log_path,
         maxBytes=max_log_size,
         backupCount=backup_count,
         encoding="utf-8",

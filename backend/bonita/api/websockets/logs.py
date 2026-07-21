@@ -10,8 +10,10 @@ from pydantic import ValidationError
 from bonita import schemas
 from bonita.core.config import settings
 from bonita.core import security
-
 router = APIRouter()
+
+# 清理 LOGGING_FORMAT 中的 PID/TID/[task_id] 前缀，只保留纯消息
+_CLEAN_PID_TID = re.compile(r'^PID:\d+ TID:\d+ \[.*?\]\s*')
 
 
 async def verify_ws_token(websocket: WebSocket, token: str) -> schemas.TokenPayload:
@@ -41,9 +43,8 @@ class LogConnectionManager:
 
     async def connect(self, websocket: WebSocket):
         """
-        接受WebSocket连接并启动日志监控
+        注册已认证的WebSocket连接并启动日志监控
         """
-        await websocket.accept()
         self.active_connections.append(websocket)
 
         # 启动日志监控任务（如果尚未启动）
@@ -107,6 +108,7 @@ class LogConnectionManager:
                 match = re.match(log_pattern, line.strip())
                 if match:
                     timestamp, log_level, log_module, message = match.groups()
+                    message = _CLEAN_PID_TID.sub('', message)
                     log_entry = schemas.LogEntry(
                         timestamp=timestamp,
                         level=log_level,
@@ -150,6 +152,7 @@ class LogConnectionManager:
                         match = re.match(log_pattern, line.strip())
                         if match:
                             timestamp, log_level, log_module, message = match.groups()
+                            message = _CLEAN_PID_TID.sub('', message)
                             log_entry = schemas.LogEntry(
                                 timestamp=timestamp,
                                 level=log_level,

@@ -1,12 +1,62 @@
 # Bonita 系统严重问题清单
 
-> 探索模式自动排查产物 · 2026-07-21
+> 探索模式自动排查产物 · 2026-07-21（更新于 2026-07-21 晚间审计后）
 > 范围：`backend/bonita`（FastAPI + Celery + SQLite + watchdog）与 `frontend/src`（Vue 3 + Vite + Pinia）
 > 评级：**P0 安全/数据丢失** · **P1 正确性/可用性** · **P2 稳健性/可维护性**
 
 ---
 
-## 概览
+## 修复状态总览
+
+### 原始 14 项问题（SYSTEM_ISSUES v1）
+
+| 编号 | 问题 | 状态 | 修复来源 |
+|------|------|------|----------|
+| P0-1 | eval() 任意代码执行 | ✅ 已修复 | `harden-auth-and-secrets` |
+| P0-2 | 写操作缺少超级管理员校验 | ✅ 已修复 | `harden-auth-and-secrets` |
+| P0-3 | SECRET_KEY 硬编码 | ✅ 已修复 | `harden-auth-and-secrets` |
+| P0-4 | CORS allow_origins=* | ✅ 已修复 | `harden-auth-and-secrets` |
+| P0-5 | 默认管理员弱口令 | ✅ 已修复 | `harden-auth-and-secrets` |
+| P1-6 | init_db 启动期阻塞 | ✅ 已修复 | `fix-task-lifecycle-and-safety` |
+| P1-7 | SQLite pool_size 被忽略 | ✅ 已修复 | `fix-task-lifecycle-and-safety` |
+| P1-8 | Celery 嵌套 get() 死锁风险 | ❌ 未修复 | 需架构重构 |
+| P1-9 | 日志字符串未使用 f-string | ✅ 已修复 | `fix-task-lifecycle-and-safety` |
+| P1-10 | WS 日志全量读取 + 轮询 | ❌ 未修复 | 需重写 WS 日志 |
+| P1-11 | file_browser 路径遍历 | ✅ 已修复 | `fix-task-lifecycle-and-safety` |
+| P1-12 | clean_others 误删 | ✅ 已修复 | `fix-input-validation-and-data-safety` |
+| P1-13 | sort_by 可注入任意属性 | ✅ 已修复 | `fix-input-validation-and-data-safety` |
+| P1-14 | WS JWT 通过 URL 传递 | ✅ 已修复 | `fix-input-validation-and-data-safety` |
+| P2-15 | MAX_CONCURRENT_TASKS 类型错误 | ✅ 已修复 | `fix-input-validation-and-data-safety` |
+| P2-16 | WatchHistory 无 user_id | ❌ 未修复 | 产品定位决定 |
+| P2-17 | get_password_hash 返回 bytes | ✅ 已修复 | `harden-auth-and-secrets` |
+| P2-18 | init_db 文件存在性判断脆弱 | ✅ 已修复 | `fix-task-lifecycle-and-safety` |
+| P2-19 | Celery 异常被装饰器吞掉 | ✅ 已修复 | `fix-task-lifecycle-and-safety` |
+| P2-20 | update_task_config 未校验 id | ✅ 已修复 | `fix-input-validation-and-data-safety` |
+
+**原始问题修复率：17/20 = 85%**
+
+### 审计新发现（2026-07-21 晚间）
+
+**后端（4 项）→ OpenSpec change: `fix-backend-audit-bugs`**
+
+| 编号 | 问题 | 严重性 | 状态 |
+|------|------|--------|------|
+| NEW-1 | `destpath=None` 时 `os.path.exists` 抛 TypeError | P1 | 待修复 |
+| NEW-2 | WS 日志正则 message 含 PID/TID 前缀（噪声） | P2 | 待修复 |
+| NEW-3 | WebSocket 双重 `accept()` 调用 | P1 | 待修复 |
+| NEW-4 | `LOGGING_LOCATION` 相对路径在 Celery 中解析不一致 | P2 | 待修复 |
+
+**前端（17 项）→ OpenSpec change: `fix-frontend-race-conditions`**
+
+| 组件 | 问题数 | 关键问题 |
+|------|--------|----------|
+| Records.vue | 7 | 请求竞态、生命周期泄漏、localStorage 校验缺失 |
+| ScrapeLogDrawer.vue | 6 | 请求竞态、轮询重叠、错误静默 |
+| Logs.vue | 4 | WS 事件过期、认证错误无 UI 反馈 |
+
+---
+
+## 原始问题详情
 
 本次共发现 **14 项严重问题**，分布如下：
 
@@ -468,22 +518,25 @@ def update_task_config(
 
 ---
 
-## 建议的修复优先级
+## 修复优先级（更新）
 
-1. **立即修复**（上线前必须）：P0-1、P0-2、P0-3、P0-4、P0-5
-2. **短期修复**（下一版本）：P1-6、P1-7、P1-9、P1-11、P1-14、P2-19
-3. **中期改进**：P1-8、P1-10、P1-12、P1-13、P2-15、P2-20
-4. **长期治理**：P2-16、P2-17、P2-18 及附录项
+1. ✅ **已完成**：P0-1 ~ P0-5（全部 P0 清零）、P1-6、P1-7、P1-9、P1-11 ~ P1-14、P2-15、P2-17 ~ P2-20
+2. **待修复 — 后端审计 bug**（`fix-backend-audit-bugs`）：destpath None 崩溃、双重 WS accept、日志路径
+3. **待修复 — 前端竞态**（`fix-frontend-race-conditions`）：请求竞态、轮询重叠、WS 事件过期
+4. **架构级**：P1-8（Celery 嵌套 get 死锁）、P1-10（WS 日志全量读取）
+5. **产品决策**：P2-16（WatchHistory 无 user_id）
 
 ---
 
-## 是否转为 OpenSpec 变更？
+## OpenSpec 变更追踪
 
-本清单是探索模式的排查产物，**尚未创建任何 OpenSpec 变更**。如果你想针对其中某些问题启动修复，可以考虑：
-
-- `harden-auth-and-secrets`：覆盖 P0-2 / P0-3 / P0-4 / P0-5（认证授权整体加固）
-- `replace-eval-in-scraping-rules`：覆盖 P0-1（单独的 RCE 修复，需要设计规则模板语法）
-- `fix-celery-task-lifecycle`：覆盖 P1-8 / P2-19（任务重试与状态管理）
-- `harden-file-operations`：覆盖 P1-11 / P1-12（路径校验与清理任务安全）
-
-需要我针对其中某个主题起草 OpenSpec 提案吗？告诉我范围即可。
+| Change | 覆盖范围 | 状态 |
+|--------|----------|------|
+| `harden-auth-and-secrets` | P0-2 ~ P0-5, P2-17 | ✅ 已完成 |
+| `fix-task-lifecycle-and-safety` | P1-6, P1-7, P1-9, P2-18, P2-19 | ✅ 已完成 |
+| `fix-input-validation-and-data-safety` | P1-12 ~ P1-14, P2-15, P2-20 | ✅ 已完成 |
+| `records-tabs-and-scrape-logs` | 功能：tabs + scrape_log + skip_on_success | 🔄 50/66（剩余验证） |
+| `records-view-customization` | 功能：状态筛选 + 列选择 + 持久化 | 🔄 26/35（剩余验证） |
+| `add-records-createtime-sort` | 功能：createtime 排序 | 🔄 8/14（剩余验证） |
+| `fix-backend-audit-bugs` | NEW-1 ~ NEW-4 | 📋 已提案，待实施 |
+| `fix-frontend-race-conditions` | 前端 17 项竞态/错误处理 | 📋 已提案，待实施 |

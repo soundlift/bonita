@@ -21,8 +21,12 @@
 
     <v-card-text>
       <v-alert color="info" icon="mdi-information" variant="tonal" class="mb-3"
-        v-if="wsConnectionStatus !== 'connected'">
+        v-if="wsConnectionStatus !== 'connected' && !authError">
         {{ wsConnectionStatus === 'connecting' ? t('pages.logs.connecting') : t('pages.logs.disconnected') }}
+      </v-alert>
+      <v-alert color="error" icon="mdi-alert-circle" variant="tonal" class="mb-3"
+        v-if="authError">
+        {{ authError }}
       </v-alert>
 
       <!-- 文本形式的日志查看器 -->
@@ -56,6 +60,8 @@ const logStore = useLogStore() // 使用日志存储
 // WebSocket连接
 const wsConnection = ref<WebSocket | null>(null)
 const wsConnectionStatus = ref("disconnected") // 'disconnected', 'connecting', 'connected'
+const authError = ref<string | null>(null)
+let wsInstanceId = 0
 const logsContainer = ref<HTMLElement | null>(null)
 const autoScroll = ref(true)
 
@@ -178,47 +184,51 @@ const scrollToBottom = () => {
     logsContainer.value.scrollTop = logsContainer.value.scrollHeight
   }
 }
-
-// 创建WebSocket连接
 const createWebSocketConnection = () => {
-  // 关闭已有连接
   closeWebSocketConnection()
 
-  // 获取token
+  // 获取token（每次连接时捕获最新 token）
   const token = localStorage.getItem("access_token")
   if (!token) {
     console.error("创建WebSocket连接失败：未找到认证token")
+    authError.value = t('pages.logs.authError') || '未找到认证令牌，请重新登录'
     return
   }
+  authError.value = null
 
+  const myId = ++wsInstanceId
   wsConnectionStatus.value = "connecting"
 
-  // 构建WebSocket地址
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
   const host = import.meta.env.VITE_API_URL
     ? new URL(import.meta.env.VITE_API_URL).host
     : window.location.host
-
-  // 构建WebSocket URL（token 不放入 URL，改为连接后发送认证消息）
   const wsUrl = `${protocol}//${host}/api/v1/ws/logs`
 
-  // 创建WebSocket连接
   try {
-    wsConnection.value = new WebSocket(wsUrl)
+    const ws = new WebSocket(wsUrl)
+    wsConnection.value = ws
 
-    // 设置事件处理器
-    wsConnection.value.onmessage = handleWebSocketMessage
-    wsConnection.value.onopen = () => {
-      // 连接建立后立即发送认证消息
-      wsConnection.value.send(JSON.stringify({ type: "auth", token: token }))
+    ws.onopen = () => {
+      if (myId !== wsInstanceId) return // 旧 socket 事件，丢弃
+      ws.send(JSON.stringify({ type: "auth", token: token }))
     }
-    wsConnection.value.onerror = (error) => {
+    ws.onmessage = (event) => {
+      if (myId !== wsInstanceId) return
+      handleWebSocketMessage(event)
+    }
+    ws.onerror = (error) => {
+      if (myId !== wsInstanceId) return
       console.error("WebSocket错误", error)
       wsConnectionStatus.value = "disconnected"
     }
-    wsConnection.value.onclose = () => {
+    ws.onclose = (event) => {
+      if (myId !== wsInstanceId) return
       console.log("WebSocket连接已关闭")
       wsConnectionStatus.value = "disconnected"
+      if (event.code === 1008) {
+        authError.value = t('pages.logs.authFailed') || '认证失败，请重新登录'
+      }
     }
   } catch (error) {
     console.error("创建WebSocket连接失败", error)
@@ -226,8 +236,8 @@ const createWebSocketConnection = () => {
   }
 }
 
-// 关闭WebSocket连接
 const closeWebSocketConnection = () => {
+  wsInstanceId++ // 使旧 socket 的事件处理器失效
   if (
     wsConnection.value &&
     wsConnection.value.readyState !== WebSocket.CLOSED

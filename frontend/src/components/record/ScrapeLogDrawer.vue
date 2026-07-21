@@ -18,8 +18,11 @@ const recordStore = useRecordStore()
 const scrapeLog = ref<any>(null)
 const loading = ref(false)
 const error404 = ref(false)
+const error = ref<string | null>(null)
 const logsContainer = ref<HTMLElement | null>(null)
 const pollTimer = ref<number | null>(null)
+const fetchGeneration = ref(0)
+const pollingInFlight = ref(false)
 
 const isRunning = computed(
   () => scrapeLog.value?.status === "running",
@@ -62,27 +65,32 @@ function formatDateTime(dateStr: string | null | undefined) {
     second: "2-digit",
     hour12: false,
   })
-}
-
 async function loadLatestLog() {
   if (props.recordId == null) return
+  const gen = ++fetchGeneration.value
   loading.value = true
-  error404.value = false
+  error.value = null
   try {
     const log = await recordStore.fetchLatestScrapeLog(props.recordId)
+    if (gen !== fetchGeneration.value) return // 陈旧响应
+    if (!props.modelValue) return // drawer 已关闭
     scrapeLog.value = log
+    error404.value = false
   } catch (err: any) {
-    // 404 -> no log available
+    if (gen !== fetchGeneration.value) return
     if (err?.status === 404 || err?.statusCode === 404) {
       error404.value = true
       scrapeLog.value = null
     } else {
       console.error("Failed to load scrape log:", err)
+      error.value = t('pages.records.scrapeLog.loadError') || '加载日志失败'
     }
   } finally {
-    loading.value = false
-    await nextTick()
-    scrollToBottom()
+    if (gen === fetchGeneration.value) {
+      loading.value = false
+      await nextTick()
+      scrollToBottom()
+    }
   }
 }
 
@@ -99,7 +107,13 @@ function startPolling() {
       stopPolling()
       return
     }
-    await loadLatestLog()
+    if (pollingInFlight.value) return // 上一次请求未完成，跳过
+    pollingInFlight.value = true
+    try {
+      await loadLatestLog()
+    } finally {
+      pollingInFlight.value = false
+    }
   }, 1000)
 }
 
@@ -120,8 +134,8 @@ watch(
   async ([open, _rid]) => {
     if (open && _rid != null) {
       await loadLatestLog()
-      if (!error404.value && !isTerminal.value) {
-        startPolling()
+      if (!isTerminal.value) {
+        startPolling() // 即使 404 也启动轮询，任务创建日志后自动出现
       }
     } else if (!open) {
       stopPolling()
@@ -169,6 +183,15 @@ onBeforeUnmount(() => {
         mdi-file-document-outline
       </v-icon>
       <div>{{ t('pages.records.noScrapeLog') }}</div>
+    </div>
+
+    <!-- Error state -->
+    <div v-else-if="error" class="pa-4 text-center">
+      <v-icon size="48" color="error" class="mb-3">mdi-alert-circle-outline</v-icon>
+      <div class="text-error mb-3">{{ error }}</div>
+      <v-btn size="small" variant="outlined" color="primary" @click="loadLatestLog">
+        {{ t('common.retry') || '重试' }}
+      </v-btn>
     </div>
 
     <!-- Log content -->

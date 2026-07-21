@@ -14,6 +14,7 @@ const activeTab = ref<'pending' | 'done'>('pending')
 const scrapeLogDrawerOpen = ref(false)
 const currentScrapeLogRecordId = ref<number | null>(null)
 const searchTimeout = ref<number | null>(null)
+const requestGeneration = ref(0)
 const selected = ref<number[]>([])
 const tagColorMap = {
   中文字幕: "#FF0000",
@@ -218,12 +219,12 @@ const handleItemsPerPageChange = async (newItemsPerPage: number) => {
   await loadData(1, newItemsPerPage)
 }
 
-// 加载数据函数
 const loadData = async (
   page = recordStore.currentPage,
   itemsPerPage = recordStore.itemsPerPage,
   isAutoRefresh = false,
 ) => {
+  const gen = ++requestGeneration.value
   // 构建搜索参数
   const searchParams: {
     page: number
@@ -265,6 +266,7 @@ const loadData = async (
     }
   }
   await recordStore.getRecords(searchParams)
+  if (gen !== requestGeneration.value) return // 陈旧响应，丢弃
 
   // 刷新后处理
   lastRefreshTime.value = new Date()
@@ -344,15 +346,16 @@ const loadSettings = () => {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return
     const settings = JSON.parse(raw)
-    // 迁移旧字段 successFilter -> activeTab (一次性)
+    // 迁移旧字段 successFilter -> activeTab (一次性，立即回写)
     if ('successFilter' in settings) {
       const old = settings.successFilter
       activeTab.value = old === true ? 'done' : 'pending'
       delete settings.successFilter
+      saveSettings()
     } else if (typeof settings.activeTab === 'string' && (settings.activeTab === 'pending' || settings.activeTab === 'done')) {
       activeTab.value = settings.activeTab
     }
-    if (Array.isArray(settings.visibleColumnKeys) && settings.visibleColumnKeys.length > 0) {
+    if (Array.isArray(settings.visibleColumnKeys)) {
       // 只保留有效的 key，确保名称列始终在内
       const valid = settings.visibleColumnKeys.filter((k: string) =>
         configurableKeys.includes(k),
@@ -362,7 +365,9 @@ const loadSettings = () => {
       }
       visibleColumnKeys.value = valid
     }
-    if (Array.isArray(settings.sortBy) && settings.sortBy.length > 0) {
+    if (Array.isArray(settings.sortBy) && settings.sortBy.length > 0
+        && typeof settings.sortBy[0]?.key === 'string'
+        && typeof settings.sortBy[0]?.order === 'string') {
       sortBy.value = settings.sortBy
     }
     if (typeof settings.itemsPerPage === "number" && settings.itemsPerPage > 0) {
@@ -397,8 +402,10 @@ const confirmDelete = async () => {
   await recordStore.deleteRecords(selected.value, forceDelete.value)
   deleteDialog.value = false
   forceDelete.value = false
-  // 清空选中项
   selected.value = []
+  // 重新加载以刷新列表（loadData 读取当前 activeTab/searchQuery/sortBy，上下文保持）
+  await loadData(recordStore.currentPage, recordStore.itemsPerPage)
+}
 }
 
 const handleRetry = () => {
@@ -445,13 +452,10 @@ watch(
       saveSettings()
     }
   },
-)
-
-// 清除搜索并重新加载数据
 const handleClearSearch = () => {
   searchQuery.value = ""
   taskIdQuery.value = ""
-  loadData(1, recordStore.itemsPerPage)
+  // watcher 防抖会自动触发 loadData，无需直接调用
 }
 
 const openScrapeLogDrawer = (item: any) => {
@@ -471,8 +475,14 @@ const rowProps = ({ item }: { item: any }) => {
   return isDeleted ? { class: 'deleted-row' } : {}
 }
 
-// 组件卸载时清除定时器
 onBeforeUnmount(() => {
+  // 清除搜索防抖定时器
+  if (searchTimeout.value) {
+    clearTimeout(searchTimeout.value)
+    searchTimeout.value = null
+  }
+  // 使进行中的请求失效
+  requestGeneration.value++
   if (refreshTimer.value) {
     clearTimeout(refreshTimer.value)
     refreshTimer.value = null
