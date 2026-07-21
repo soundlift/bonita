@@ -65,6 +65,8 @@ def delete_config(
     删除配置
     """
     config = session.get(ScrapingConfig, id)
+    if not config:
+        raise HTTPException(status_code=404, detail="配置未找到")
     session.delete(config)
     session.commit()
     return schemas.Response(success=True, message="配置删除成功")

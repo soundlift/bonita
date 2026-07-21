@@ -2,8 +2,10 @@ import os
 import logging
 import secrets
 import tempfile
+import time
 import yaml
 from typing import Any, Dict, Optional, Tuple
+from pydantic import model_validator
 from pydantic_settings import (
     BaseSettings,
     SettingsConfigDict,
@@ -55,13 +57,13 @@ class Settings(BaseSettings):
     ALEMBIC_LOCATION: str = "./bonita/alembic"
     # DATABASE_LOCATION
     DATABASE_LOCATION: str = "./data/db.sqlite3"
-    SQLALCHEMY_DATABASE_URI: str = f"sqlite:///{DATABASE_LOCATION}"
+    SQLALCHEMY_DATABASE_URI: Optional[str] = None
     # CACHE_LOCATION
     CACHE_LOCATION: str = "./data/cache"
     # CELERY — broker 与业务数据库分离，避免高并发写入踩踏
     CELERY_BROKER_DB_LOCATION: str = "./data/celery_broker.sqlite3"
-    CELERY_BROKER_URL: str = os.environ.get("CELERY_BROKER_URL", f"sqla+sqlite:///{CELERY_BROKER_DB_LOCATION}")
-    CELERY_RESULT_BACKEND: str = os.environ.get("CELERY_RESULT_BACKEND", f"db+sqlite:///{DATABASE_LOCATION}")
+    CELERY_BROKER_URL: Optional[str] = None
+    CELERY_RESULT_BACKEND: Optional[str] = None
     MAX_CONCURRENT_TASKS: int = int(os.environ.get("MAX_CONCURRENT_TASKS", "5"))
     # 日志
     LOGGING_FORMAT: str = "[%(asctime)s] %(levelname)s in %(module)s: PID:%(process)d TID:%(thread)d [%(task_id)s] %(message)s"
@@ -85,8 +87,21 @@ class Settings(BaseSettings):
     MONITOR_USE_POLLING: bool = False
     # 轮询间隔（秒）
     MONITOR_POLLING_INTERVAL: int = 30
-    # 文件浏览器路径白名单（空列表=不限制，向后兼容）
+    # 文件浏览器路径白名单（空列表=仅超级管理员可访问）
     ALLOWED_FILE_ROOTS: list[str] = []
+
+    @model_validator(mode="after")
+    def _compute_derived_uris(self) -> "Settings":
+        """在所有配置源合并后，基于最终的 DATABASE_LOCATION 派生 URI。
+        仅在 URI 未被显式覆盖（仍为 None）时生效，避免覆盖用户自定义值。
+        """
+        if self.SQLALCHEMY_DATABASE_URI is None:
+            self.SQLALCHEMY_DATABASE_URI = f"sqlite:///{self.DATABASE_LOCATION}"
+        if self.CELERY_BROKER_URL is None:
+            self.CELERY_BROKER_URL = f"sqla+sqlite:///{self.CELERY_BROKER_DB_LOCATION}"
+        if self.CELERY_RESULT_BACKEND is None:
+            self.CELERY_RESULT_BACKEND = f"db+sqlite:///{self.DATABASE_LOCATION}"
+        return self
 
     @classmethod
     def settings_customise_sources(
@@ -121,51 +136,80 @@ _logger = logging.getLogger(__name__)
 
 def _ensure_secret_key(cfg: Settings) -> None:
     """检测 SECRET_KEY 是否为不安全的默认值，若是则生成随机密钥并持久化。
-    通过文件锁保护并发写入（uvicorn reload + Celery worker 同时启动）。
+    通过锁文件（O_EXCL 原子创建）保护并发写入（uvicorn reload + Celery worker 同时启动）。
     """
     if cfg.SECRET_KEY not in _INSECURE_SECRET_KEYS:
         return
 
-    new_key = secrets.token_urlsafe(32)
-
-    # 读取现有 YAML（若存在）
-    existing: dict = {}
-    if os.path.exists(_yaml_path):
-        try:
-            with open(_yaml_path, "r", encoding="utf-8") as f:
-                existing = yaml.safe_load(f) or {}
-        except Exception:
-            existing = {}
-
-    # 若其他进程已写入安全密钥，直接使用
-    existing_key = existing.get("SECRET_KEY")
-    if existing_key and existing_key not in _INSECURE_SECRET_KEYS:
-        cfg.SECRET_KEY = existing_key
-        return
-
-    existing["SECRET_KEY"] = new_key
-
-    # 原子写入：先写临时文件，再 os.replace（跨平台原子操作）
+    lock_path = _yaml_path + ".lock"
+    lock_fd = None
+    held_lock = False
     try:
-        os.makedirs(os.path.dirname(os.path.abspath(_yaml_path)), exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(
-            dir=os.path.dirname(os.path.abspath(_yaml_path)),
-            suffix=".tmp",
+        # 尝试原子创建锁文件；失败说明另一进程正在写入
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        held_lock = True
+    except FileExistsError:
+        # 另一进程持有锁，短暂等待后直接读取其写入结果
+        for _ in range(20):
+            time.sleep(0.1)
+            try:
+                lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                held_lock = True
+                break
+            except FileExistsError:
+                continue
+
+    try:
+        # 重新读取 YAML（可能在等待期间已被其他进程写入安全密钥）
+        existing: dict = {}
+        if os.path.exists(_yaml_path):
+            try:
+                with open(_yaml_path, "r", encoding="utf-8") as f:
+                    existing = yaml.safe_load(f) or {}
+            except Exception:
+                existing = {}
+
+        existing_key = existing.get("SECRET_KEY")
+        if existing_key and existing_key not in _INSECURE_SECRET_KEYS:
+            cfg.SECRET_KEY = existing_key
+            return
+
+        # 仍需要生成新密钥；若未拿到锁则用进程内随机值（与旧版行为一致）
+        new_key = secrets.token_urlsafe(32)
+        existing["SECRET_KEY"] = new_key
+
+        if held_lock:
+            try:
+                os.makedirs(os.path.dirname(os.path.abspath(_yaml_path)), exist_ok=True)
+                fd, tmp_path = tempfile.mkstemp(
+                    dir=os.path.dirname(os.path.abspath(_yaml_path)),
+                    suffix=".tmp",
+                )
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(existing, f, default_flow_style=False, allow_unicode=True)
+                os.replace(tmp_path, _yaml_path)
+            except Exception as e:
+                _logger.error(f"[BONITA] 写入 SECRET_KEY 到 {_yaml_path} 失败: {e}")
+        else:
+            _logger.warning("[BONITA] 未能获取 SECRET_KEY 锁文件，本次启动使用进程内随机密钥。")
+
+        cfg.SECRET_KEY = new_key
+
+        _logger.warning(
+            "[BONITA] SECRET_KEY 已自动生成并写入 %s。"
+            "已签发的 Token 将失效，用户需重新登录。", _yaml_path
         )
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            yaml.safe_dump(existing, f, default_flow_style=False, allow_unicode=True)
-        os.replace(tmp_path, _yaml_path)
-    except Exception as e:
-        _logger.error(f"[BONITA] 写入 SECRET_KEY 到 {_yaml_path} 失败: {e}")
-        # 写入失败仍继续，使用内存中的密钥（与旧行为一致）
-
-    cfg.SECRET_KEY = new_key
-
-
-    _logger.warning(
-        "[BONITA] SECRET_KEY 已自动生成并写入 %s。"
-        "已签发的 Token 将失效，用户需重新登录。", _yaml_path
-    )
+    finally:
+        if lock_fd is not None:
+            try:
+                os.close(lock_fd)
+            except OSError:
+                pass
+        if held_lock:
+            try:
+                os.remove(lock_path)
+            except OSError:
+                pass
 
 
 def _ensure_admin_password(cfg: Settings) -> None:
@@ -182,3 +226,9 @@ def _ensure_admin_password(cfg: Settings) -> None:
 
 _ensure_secret_key(settings)
 _ensure_admin_password(settings)
+
+if not settings.ALLOWED_FILE_ROOTS:
+    logging.getLogger(__name__).warning(
+        "[BONITA] ALLOWED_FILE_ROOTS 未配置，文件浏览接口仅超级管理员可用。"
+        "建议在 config.yaml 中显式设置允许的根目录以启用普通用户访问。"
+    )

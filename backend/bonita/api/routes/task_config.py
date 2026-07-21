@@ -79,6 +79,8 @@ def delete_task_config(
     删除任务配置
     """
     config = session.get(TransferConfig, id)
+    if not config:
+        raise HTTPException(status_code=404, detail="任务配置未找到")
     if config.auto_watch:
         MonitorService().stop_monitoring_directory(config.source_folder, config.id)
         MonitorService().stop_monitoring_directory(config.output_folder, config.id)

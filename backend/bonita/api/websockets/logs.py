@@ -1,8 +1,8 @@
 import os
 import re
 import asyncio
-from typing import List
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
+from typing import List, Optional
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from fastapi.websockets import WebSocketState
 from jose import jwt, JWTError
 from pydantic import ValidationError
@@ -16,9 +16,9 @@ router = APIRouter()
 _CLEAN_PID_TID = re.compile(r'^PID:\d+ TID:\d+ \[.*?\]\s*')
 
 
-async def verify_ws_token(websocket: WebSocket, token: str) -> schemas.TokenPayload:
+async def verify_ws_token(websocket: WebSocket, token: str) -> Optional[schemas.TokenPayload]:
     """
-    验证WebSocket连接的令牌
+    验证WebSocket连接的令牌。验证失败时关闭连接并返回 None。
     """
     try:
         payload = jwt.decode(

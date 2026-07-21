@@ -1,10 +1,10 @@
 import os
 import logging
 import datetime
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from bonita import schemas
-from bonita.api.deps import SessionDep
+from bonita.api.deps import SessionDep, get_current_active_superuser
 from bonita.core.config import settings
 
 router = APIRouter()
@@ -13,11 +13,12 @@ logger = logging.getLogger(__name__)
 
 def _is_path_allowed(path: str) -> bool:
     """校验路径是否在允许的根目录范围内。
-    ALLOWED_FILE_ROOTS 为空时不限制（向后兼容）。
+    ALLOWED_FILE_ROOTS 为空时返回 False（拒绝访问）。
+    调用方需在空列表场景下额外要求超级管理员权限。
     """
     allowed_roots = settings.ALLOWED_FILE_ROOTS
     if not allowed_roots:
-        return True
+        return False
     try:
         real_path = os.path.realpath(path)
         return any(
@@ -28,27 +29,34 @@ def _is_path_allowed(path: str) -> bool:
         return False
 
 
-logger = logging.getLogger(__name__)
-
-
 @router.get("/list", response_model=schemas.FileListResponse)
 async def list_directory(
-        session: SessionDep,
         directory_path: str = Query(None, description="要浏览的目录路径"),
+        _superuser: None = Depends(get_current_active_superuser),
         ):
     """ 获取指定目录中的文件列表
+
+    安全策略：
+    - ALLOWED_FILE_ROOTS 非空：路径必须在白名单内，且需登录。
+    - ALLOWED_FILE_ROOTS 为空：仅超级管理员可访问（避免默认放开全盘）。
     """
     directory_path = directory_path or ""
 
     # 路径白名单校验
     if directory_path and not _is_path_allowed(directory_path):
+        # 若白名单为空，提示管理员通过配置 ALLOWED_FILE_ROOTS 启用
+        if not settings.ALLOWED_FILE_ROOTS:
+            raise HTTPException(
+                status_code=403,
+                detail="ALLOWED_FILE_ROOTS 未配置，文件浏览被禁用。请在 config.yaml 中设置允许的根目录。",
+            )
         logger.warning(f"路径访问被拒绝（不在 ALLOWED_FILE_ROOTS 范围内）: {directory_path}")
         return schemas.FileListResponse(
             data=[],
             current_path=directory_path,
             parent_path=None
         )
-    
+
     # 检查路径是否存在
     if not os.path.exists(directory_path):
         return schemas.FileListResponse(

@@ -9,6 +9,11 @@ from bonita.utils.downloader import process_cached_file
 
 router = APIRouter()
 
+_ALLOWED_SORT_FIELDS_METADATA = {
+    "updatetime", "createtime", "title", "number", "studio",
+    "director", "actor", "release", "year", "rating", "userrating",
+}
+
 
 @router.post("/", response_model=schemas.MetadataPublic)
 async def create_metadata(
@@ -62,7 +67,9 @@ async def get_metadata(
             Metadata.actor.ilike(f"%{filter}%")
         )
 
-    # Apply sorting
+    # Apply sorting（白名单校验，防止属性注入）
+    if sort_by not in _ALLOWED_SORT_FIELDS_METADATA:
+        raise HTTPException(status_code=400, detail=f"无效排序字段: {sort_by}")
     sort_column = getattr(Metadata, sort_by, Metadata.updatetime)
     query = query.order_by(sort_column.desc() if sort_desc else sort_column.asc())
 

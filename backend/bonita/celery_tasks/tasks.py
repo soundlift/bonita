@@ -613,13 +613,15 @@ def celery_clean_others(self, root_path, done_list=None):
     from bonita.db import SessionFactory
     from bonita.db.models.record import TransRecords
     known_paths = set()
+    # 规范化根目录并加目录边界，避免 LIKE '/media/foo%' 误匹配 '/media/foobar'
+    normalized_root = root_path.rstrip(os.sep) + os.sep
     try:
         with SessionFactory() as session:
             records = session.query(TransRecords.destpath).filter(
                 TransRecords.success == True,
                 TransRecords.destpath.isnot(None),
                 TransRecords.destpath != '',
-                TransRecords.destpath.like(f"{root_path}%"),
+                TransRecords.destpath.startswith(normalized_root),
             ).all()
             known_paths = {r.destpath for r in records}
     except Exception as e:
@@ -633,12 +635,18 @@ def celery_clean_others(self, root_path, done_list=None):
         if real_dest not in known_paths and dest not in known_paths:
             cleaned_files.append(dest)
 
+    delete_errors = []
     for torm in cleaned_files:
         logger.info(f"  ✗ 删除: {os.path.basename(torm)}")
-        os.remove(torm)
+        try:
+            os.remove(torm)
+        except OSError as e:
+            logger.warning(f"    删除失败（跳过）: {torm} - {e}")
+            delete_errors.append(torm)
     cleanFolderWithoutSuffix(root_path, video_type)
 
-    logger.info(f"## [清理任务] END - 删除 {len(cleaned_files)} 个文件（已知成功记录: {len(known_paths)}）")
+    logger.info(f"## [清理任务] END - 删除 {len(cleaned_files) - len(delete_errors)} 个文件"
+                f"（失败 {len(delete_errors)}，已知成功记录: {len(known_paths)}）")
     return cleaned_files
 
 
