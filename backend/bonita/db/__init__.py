@@ -2,16 +2,18 @@
 from typing import Generator
 from sqlalchemy import create_engine, inspect, event
 from sqlalchemy.orm import sessionmaker, Session, declared_attr, as_declarative
+from sqlalchemy.pool import NullPool
 
 from bonita.core.config import settings
 from bonita.utils.filehelper import OperationMethod
 
+# SQLite 使用 NullPool：每次请求新建连接、用完关闭，
+# 避免跨线程连接复用问题。pool_size/max_overflow 仅对 QueuePool 有效。
 engine = create_engine(
     settings.SQLALCHEMY_DATABASE_URI,
     connect_args={"check_same_thread": False},
-    pool_size=5,
-    max_overflow=10,
     pool_pre_ping=True,
+    poolclass=NullPool,
 )
 
 

@@ -1,8 +1,9 @@
 import os
 import logging
 import secrets
+import tempfile
 import yaml
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 from pydantic_settings import (
     BaseSettings,
     SettingsConfigDict,
@@ -57,8 +58,9 @@ class Settings(BaseSettings):
     SQLALCHEMY_DATABASE_URI: str = f"sqlite:///{DATABASE_LOCATION}"
     # CACHE_LOCATION
     CACHE_LOCATION: str = "./data/cache"
-    # CELERY
-    CELERY_BROKER_URL: str = os.environ.get("CELERY_BROKER_URL", f"sqla+sqlite:///{DATABASE_LOCATION}")
+    # CELERY — broker 与业务数据库分离，避免高并发写入踩踏
+    CELERY_BROKER_DB_LOCATION: str = "./data/celery_broker.sqlite3"
+    CELERY_BROKER_URL: str = os.environ.get("CELERY_BROKER_URL", f"sqla+sqlite:///{CELERY_BROKER_DB_LOCATION}")
     CELERY_RESULT_BACKEND: str = os.environ.get("CELERY_RESULT_BACKEND", f"db+sqlite:///{DATABASE_LOCATION}")
     # 最大并发任务数, 受 worker 数量影响
     MAX_CONCURRENT_TASKS: int = os.environ.get("MAX_CONCURRENT_TASKS", 5)
@@ -66,16 +68,16 @@ class Settings(BaseSettings):
     LOGGING_FORMAT: str = "[%(asctime)s] %(levelname)s in %(module)s: PID:%(process)d TID:%(thread)d [%(task_id)s] %(message)s"
     LOGGING_LOCATION: str = "./data/bonita.log"
     LOGGING_LEVEL: int = logging.INFO
-    # SECRET_KEY: str = secrets.token_urlsafe(32)
-    SECRET_KEY: str = "secret key"
+    # 首次启动时自动生成并持久化到 config.yaml；源码中不保留硬编码默认值
+    SECRET_KEY: Optional[str] = None
     # 60 minutes * 24 hours * 8 days = 8 days
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
     # 跨域
-    BACKEND_CORS_ORIGINS: list = ["*"]
+    BACKEND_CORS_ORIGINS: list = []
     # 初始化管理员
     FIRST_SUPERUSER: str = "admin"
     FIRST_SUPERUSER_EMAIL: str = "admin@example.com"
-    FIRST_SUPERUSER_PASSWORD: str = "changepwd"
+    FIRST_SUPERUSER_PASSWORD: Optional[str] = None
     # 是否开放注册
     USERS_OPEN_REGISTRATION: bool = False
 
@@ -84,6 +86,8 @@ class Settings(BaseSettings):
     MONITOR_USE_POLLING: bool = False
     # 轮询间隔（秒）
     MONITOR_POLLING_INTERVAL: int = 30
+    # 文件浏览器路径白名单（空列表=不限制，向后兼容）
+    ALLOWED_FILE_ROOTS: list[str] = []
 
     @classmethod
     def settings_customise_sources(
@@ -110,3 +114,72 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+_INSECURE_SECRET_KEYS = {None, "", "secret key"}
+_yaml_path = os.environ.get("BONITA_CONFIG", "./data/config.yaml")
+_logger = logging.getLogger(__name__)
+
+
+def _ensure_secret_key(cfg: Settings) -> None:
+    """检测 SECRET_KEY 是否为不安全的默认值，若是则生成随机密钥并持久化。
+    通过文件锁保护并发写入（uvicorn reload + Celery worker 同时启动）。
+    """
+    if cfg.SECRET_KEY not in _INSECURE_SECRET_KEYS:
+        return
+
+    new_key = secrets.token_urlsafe(32)
+
+    # 读取现有 YAML（若存在）
+    existing: dict = {}
+    if os.path.exists(_yaml_path):
+        try:
+            with open(_yaml_path, "r", encoding="utf-8") as f:
+                existing = yaml.safe_load(f) or {}
+        except Exception:
+            existing = {}
+
+    # 若其他进程已写入安全密钥，直接使用
+    existing_key = existing.get("SECRET_KEY")
+    if existing_key and existing_key not in _INSECURE_SECRET_KEYS:
+        cfg.SECRET_KEY = existing_key
+        return
+
+    existing["SECRET_KEY"] = new_key
+
+    # 原子写入：先写临时文件，再 os.replace（跨平台原子操作）
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(_yaml_path)), exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=os.path.dirname(os.path.abspath(_yaml_path)),
+            suffix=".tmp",
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            yaml.safe_dump(existing, f, default_flow_style=False, allow_unicode=True)
+        os.replace(tmp_path, _yaml_path)
+    except Exception as e:
+        _logger.error(f"[BONITA] 写入 SECRET_KEY 到 {_yaml_path} 失败: {e}")
+        # 写入失败仍继续，使用内存中的密钥（与旧行为一致）
+
+    cfg.SECRET_KEY = new_key
+
+
+    _logger.warning(
+        "[BONITA] SECRET_KEY 已自动生成并写入 %s。"
+        "已签发的 Token 将失效，用户需重新登录。", _yaml_path
+    )
+
+
+def _ensure_admin_password(cfg: Settings) -> None:
+    """若管理员密码为 None，生成随机密码并打印到日志。"""
+    if cfg.FIRST_SUPERUSER_PASSWORD is not None:
+        return
+    random_pwd = secrets.token_urlsafe(12)
+    cfg.FIRST_SUPERUSER_PASSWORD = random_pwd
+    _logger.warning(
+        "[BONITA] 临时管理员密码: %s （用户: %s）\n"
+        "请首次登录后立即修改！", random_pwd, cfg.FIRST_SUPERUSER
+    )
+
+
+_ensure_secret_key(settings)
+_ensure_admin_password(settings)

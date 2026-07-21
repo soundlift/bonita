@@ -54,6 +54,7 @@ def manage_celery_task(task_type: str):
 
                 with CeleryTaskService() as task_service:
                     task_service.fail_task(task_id, error_message)
+                raise  # 让 Celery autoretry 生效
 
         return wrapper
     return decorator

@@ -135,12 +135,12 @@ trap cleanup EXIT INT TERM
 # 后端 API
 echo -e "\033[36m[dev]\033[0m 启动后端 FastAPI (:8000)..."
 cd "$BACKEND"
-"$VENV_PYTHON" -m uvicorn bonita.main:app --host 0.0.0.0 --port 8000 --reload &
+BONITA_DEV_MODE=true FIRST_SUPERUSER_PASSWORD=changepwd "$VENV_PYTHON" -m uvicorn bonita.main:app --host 0.0.0.0 --port 8000 --reload &
 BACKEND_PID=$!
 
 # Celery Worker
 echo -e "\033[36m[dev]\033[0m 启动 Celery Worker..."
-"$VENV_PYTHON" -m celery --app bonita.worker.celery worker --pool threads --concurrency 5 --events --loglevel INFO &
+BONITA_DEV_MODE=true FIRST_SUPERUSER_PASSWORD=changepwd "$VENV_PYTHON" -m celery --app bonita.worker.celery worker --pool threads --concurrency 5 --events --loglevel INFO &
 CELERY_PID=$!
 
 # 前端 Vite

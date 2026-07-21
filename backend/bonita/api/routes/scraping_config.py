@@ -1,8 +1,8 @@
 from typing import Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from bonita import schemas
-from bonita.api.deps import CurrentUser, SessionDep
+from bonita.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from bonita.db.models.scraping import ScrapingConfig
 
 
@@ -21,7 +21,8 @@ def get_all_configs(session: SessionDep, skip: int = 0, limit: int = 100) -> Any
     return schemas.ScrapingConfigsPublic(data=config_list, count=count)
 
 
-@router.post("/", response_model=schemas.ScrapingConfigPublic)
+@router.post("/", response_model=schemas.ScrapingConfigPublic,
+             dependencies=[Depends(get_current_active_superuser)])
 def create_config(
     session: SessionDep, current_user: CurrentUser, config_in: schemas.ScrapingConfigCreate
 ) -> Any:
@@ -34,7 +35,8 @@ def create_config(
     return config
 
 
-@router.put("/{id}", response_model=schemas.ScrapingConfigPublic)
+@router.put("/{id}", response_model=schemas.ScrapingConfigPublic,
+            dependencies=[Depends(get_current_active_superuser)])
 def update_config(
     session: SessionDep,
     id: int,
@@ -53,7 +55,8 @@ def update_config(
     return config
 
 
-@router.delete("/{id}", response_model=schemas.Response)
+@router.delete("/{id}", response_model=schemas.Response,
+               dependencies=[Depends(get_current_active_superuser)])
 def delete_config(
     session: SessionDep,
     id: int
@@ -64,4 +67,4 @@ def delete_config(
     config = session.get(ScrapingConfig, id)
     session.delete(config)
     session.commit()
-    return schemas.Response(success=True, message="配置删除成功") 
+    return schemas.Response(success=True, message="配置删除成功")

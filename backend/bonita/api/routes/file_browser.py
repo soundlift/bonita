@@ -1,12 +1,33 @@
 import os
 import logging
 import datetime
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
 
 from bonita import schemas
 from bonita.api.deps import SessionDep
+from bonita.core.config import settings
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _is_path_allowed(path: str) -> bool:
+    """校验路径是否在允许的根目录范围内。
+    ALLOWED_FILE_ROOTS 为空时不限制（向后兼容）。
+    """
+    allowed_roots = settings.ALLOWED_FILE_ROOTS
+    if not allowed_roots:
+        return True
+    try:
+        real_path = os.path.realpath(path)
+        return any(
+            os.path.commonpath([real_path, os.path.realpath(root)]) == os.path.realpath(root)
+            for root in allowed_roots
+        )
+    except (ValueError, OSError):
+        return False
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,6 +39,15 @@ async def list_directory(
     """ 获取指定目录中的文件列表
     """
     directory_path = directory_path or ""
+
+    # 路径白名单校验
+    if directory_path and not _is_path_allowed(directory_path):
+        logger.warning(f"路径访问被拒绝（不在 ALLOWED_FILE_ROOTS 范围内）: {directory_path}")
+        return schemas.FileListResponse(
+            data=[],
+            current_path=directory_path,
+            parent_path=None
+        )
     
     # 检查路径是否存在
     if not os.path.exists(directory_path):

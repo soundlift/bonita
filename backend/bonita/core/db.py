@@ -1,10 +1,14 @@
 
 import os
+import logging
+import secrets
 from alembic.command import upgrade, stamp
 from alembic.config import Config
 
 from bonita.core.config import settings
 from bonita.core.security import get_password_hash
+
+logger = logging.getLogger(__name__)
 from bonita.db import Base, engine, SessionFactory
 from bonita.db.models import *
 
@@ -25,13 +29,18 @@ def init_super_user():
     """
     初始化超级管理员
     """
+    pwd = settings.FIRST_SUPERUSER_PASSWORD
+    if pwd is None:
+        # 不应走到这里——_ensure_admin_password 已在 config.py 中处理
+        pwd = secrets.token_urlsafe(12)
+        logger.warning("[BONITA] init_super_user: 密码未在配置阶段生成，临时密码: %s", pwd)
     with SessionFactory() as session:
         _user = User.get_user_by_email(session=session, email=settings.FIRST_SUPERUSER_EMAIL)
         if not _user:
             _user = User(
                 name=settings.FIRST_SUPERUSER,
                 email=settings.FIRST_SUPERUSER_EMAIL,
-                hashed_password=get_password_hash(settings.FIRST_SUPERUSER_PASSWORD),
+                hashed_password=get_password_hash(pwd),
                 is_active=True,
                 is_superuser=True
             )

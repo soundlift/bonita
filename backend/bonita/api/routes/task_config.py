@@ -1,8 +1,8 @@
 from typing import Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from bonita import schemas
-from bonita.api.deps import CurrentUser, SessionDep
+from bonita.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from bonita.db.models.task import TransferConfig
 from bonita.modules.monitor.monitor import MonitorService
 
@@ -21,7 +21,8 @@ def get_all_task_configs(session: SessionDep, skip: int = 0, limit: int = 100) -
     return schemas.TransferConfigsPublic(data=config_list, count=count)
 
 
-@router.post("/", response_model=schemas.TransferConfigPublic)
+@router.post("/", response_model=schemas.TransferConfigPublic,
+             dependencies=[Depends(get_current_active_superuser)])
 def create_task_config(
     session: SessionDep, current_user: CurrentUser, config_in: schemas.TransferConfigCreate
 ) -> Any:
@@ -41,7 +42,8 @@ def create_task_config(
     return task_config
 
 
-@router.put("/{id}", response_model=schemas.TransferConfigPublic)
+@router.put("/{id}", response_model=schemas.TransferConfigPublic,
+            dependencies=[Depends(get_current_active_superuser)])
 def update_task_config(
     session: SessionDep,
     id: int,
@@ -67,7 +69,8 @@ def update_task_config(
     return task_config
 
 
-@router.delete("/{id}", response_model=schemas.Response)
+@router.delete("/{id}", response_model=schemas.Response,
+               dependencies=[Depends(get_current_active_superuser)])
 def delete_task_config(
     session: SessionDep,
     id: int

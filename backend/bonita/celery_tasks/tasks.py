@@ -520,26 +520,22 @@ def celery_scrapping(self, file_path, scraping_dict, force_refresh=False):
                 metadata_record.create(session)
             metadata_mixed = schemas.MetadataMixed(**metadata_record.to_dict())
 
-        # 根据规则生成文件夹和文件名
-        # title / actor 截断：max_title_len 同时作用于 naming_rule 与 location_rule，
-        # 并独立判断（旧逻辑只看 location_rule，导致 naming_rule 的 title 漏截）。
+        # 根据规则生成文件夹和文件名（安全模板渲染，禁止 eval）
+        from bonita.utils.rule_renderer import render_rule
         maxlen = scraping_conf.max_title_len
-        rule_folder = scraping_conf.location_rule
-        rule_name = scraping_conf.naming_rule
-        md = metadata_mixed.__dict__
-        short_title = metadata_mixed.title[0:maxlen] if len(metadata_mixed.title) > maxlen else metadata_mixed.title
-        short_actor = "多人作品" if len(metadata_mixed.actor) > maxlen else metadata_mixed.actor
-
-        def _apply_short(rule: str) -> str:
-            """对单条规则应用 title/actor 截断后求值"""
-            if 'title' in rule and len(metadata_mixed.title) > maxlen:
-                rule = rule.replace("title", repr(short_title))
-            if 'actor' in rule and len(metadata_mixed.actor) > maxlen:
-                rule = rule.replace("actor", repr(short_actor))
-            return eval(rule, dict(md, title=short_title, actor=short_actor))
-
-        extra_folder = _apply_short(rule_folder)
-        extra_name = _apply_short(rule_name)
+        extra_folder = render_rule(scraping_conf.location_rule, metadata_mixed)
+        extra_name = render_rule(scraping_conf.naming_rule, metadata_mixed)
+        # 演员过长时降级为"多人作品"
+        if 'actor' in scraping_conf.location_rule and len(metadata_mixed.actor) > maxlen:
+            metadata_mixed.actor = '多人作品'
+            extra_folder = render_rule(scraping_conf.location_rule, metadata_mixed)
+            extra_name = render_rule(scraping_conf.naming_rule, metadata_mixed)
+        # 标题过长时截断
+        if 'title' in scraping_conf.location_rule and len(metadata_mixed.title) > maxlen:
+            shorttitle = metadata_mixed.title[0:maxlen]
+            metadata_mixed.title = shorttitle
+            extra_folder = render_rule(scraping_conf.location_rule, metadata_mixed)
+            extra_name = render_rule(scraping_conf.naming_rule, metadata_mixed)
 
         # 清理和验证生成的路径
         # 移除路径中的非法字符
@@ -635,7 +631,7 @@ def celery_emby_scan(self, task_json):
         emby_service.trigger_library_scan()
         logger.info("## [Emby扫描] END")
     except Exception as e:
-        logger.error("## [Emby扫描] ✗ 失败: {str(e)}")
+        logger.error(f"## [Emby扫描] ✗ 失败: {e}")
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3},
@@ -726,8 +722,8 @@ def celery_import_nfo(self, folder_path, option):
             finally:
                 session.close()
         logger.info("## [NFO导入] END")
-    except Exception:
-        logger.error("## [NFO导入] ✗ 失败: {str(e)}")
+    except Exception as e:
+        logger.error(f"## [NFO导入] ✗ 失败: {e}")
     return True
 
 

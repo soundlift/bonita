@@ -127,6 +127,7 @@ Start-Process pwsh -ArgumentList @(
     "-NoExit", "-Command",
     "Write-Host '=== Bonita Backend (FastAPI :8000) ===' -ForegroundColor Cyan;",
     "Set-Location '$Backend';",
+    "`$env:BONITA_DEV_MODE='true'; `$env:FIRST_SUPERUSER_PASSWORD='changepwd';",
     "& '.venv\Scripts\python.exe' -m uvicorn bonita.main:app --host 0.0.0.0 --port 8000 --reload"
 )
 Write-Ok "后端已启动 → http://localhost:8000"
@@ -136,6 +137,7 @@ Start-Process pwsh -ArgumentList @(
     "-NoExit", "-Command",
     "Write-Host '=== Bonita Celery Worker ===' -ForegroundColor Cyan;",
     "Set-Location '$Backend';",
+    "`$env:BONITA_DEV_MODE='true'; `$env:FIRST_SUPERUSER_PASSWORD='changepwd';",
     "& '.venv\Scripts\python.exe' -m celery --app bonita.worker.celery worker --pool threads --concurrency 5 --events --loglevel INFO"
 )
 Write-Ok "Celery Worker 已启动"

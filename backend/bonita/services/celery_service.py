@@ -26,7 +26,15 @@ class CeleryTaskService:
             self.session.close()
 
     def create_task(self, task_id: str, task_type: str) -> CeleryTask:
-        """创建新任务记录"""
+        """创建新任务记录（幂等：若 task_id 已存在则更新状态）"""
+        task = self.session.query(CeleryTask).filter(CeleryTask.task_id == task_id).first()
+        if task:
+            # 重试场景：重置状态为 PENDING
+            task.status = TaskStatusEnum.PENDING
+            task.progress = 0.0
+            task.error = None
+            self.session.commit()
+            return task
         task = CeleryTask(
             task_id=task_id,
             task_type=task_type,

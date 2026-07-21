@@ -12,8 +12,8 @@ class ScrapingConfig(Base):
     save_metadata = Column(Boolean, default=True)
 
     scraping_sites = Column(String, default="")
-    location_rule = Column(String, default="actor+'/'+number+' '+title")
-    naming_rule = Column(String, default="number+' '+title")
+    location_rule = Column(String, default="{actor}/{number} {title}")
+    naming_rule = Column(String, default="{number} {title}")
     max_title_len = Column(Integer, default=50)
 
     morestoryline = Column(Boolean, default=True)

@@ -1,12 +1,12 @@
 import requests
 from urllib.parse import urljoin
 from typing import Any, List, Dict
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 import traceback
 
 from bonita import schemas
-from bonita.api.deps import SessionDep
+from bonita.api.deps import SessionDep, get_current_active_superuser
 from bonita.services.setting_service import SettingService
 from bonita.modules.media_service.emby import EmbyService
 from bonita.modules.downloader.transmission import TransmissionClient
@@ -27,7 +27,8 @@ def get_proxy_settings(session: SessionDep) -> Any:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/proxy", response_model=schemas.Response)
+@router.post("/proxy", response_model=schemas.Response,
+             dependencies=[Depends(get_current_active_superuser)])
 def update_proxy_settings(
     *,
     session: SessionDep,
@@ -66,7 +67,8 @@ def get_emby_settings(session: SessionDep) -> Any:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/emby", response_model=schemas.Response)
+@router.post("/emby", response_model=schemas.Response,
+             dependencies=[Depends(get_current_active_superuser)])
 def update_emby_settings(
     *,
     session: SessionDep,
@@ -109,7 +111,8 @@ def update_emby_settings(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/emby/test", response_model=schemas.Response)
+@router.post("/emby/test", response_model=schemas.Response,
+             dependencies=[Depends(get_current_active_superuser)])
 def test_emby_connection(
     *,
     test_data: schemas.EmbySettings
@@ -158,7 +161,8 @@ def get_jellyfin_settings(session: SessionDep) -> Any:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/jellyfin", response_model=schemas.Response)
+@router.post("/jellyfin", response_model=schemas.Response,
+             dependencies=[Depends(get_current_active_superuser)])
 def update_jellyfin_settings(
     *,
     session: SessionDep,
@@ -184,7 +188,8 @@ def update_jellyfin_settings(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/jellyfin/test", response_model=schemas.Response)
+@router.post("/jellyfin/test", response_model=schemas.Response,
+             dependencies=[Depends(get_current_active_superuser)])
 def test_jellyfin_connection(
     *,
     test_data: schemas.JellyfinSettings
@@ -243,7 +248,8 @@ def get_transmission_settings(session: SessionDep) -> Any:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/transmission", response_model=schemas.Response)
+@router.post("/transmission", response_model=schemas.Response,
+             dependencies=[Depends(get_current_active_superuser)])
 def update_transmission_settings(
     *,
     session: SessionDep,
@@ -272,7 +278,8 @@ def update_transmission_settings(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/transmission/test", response_model=schemas.Response)
+@router.post("/transmission/test", response_model=schemas.Response,
+             dependencies=[Depends(get_current_active_superuser)])
 def test_transmission_connection(
     *,
     test_data: schemas.TransmissionSettings
@@ -335,7 +342,8 @@ def get_parse_blacklist(session: SessionDep) -> Any:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/parse-blacklist", response_model=schemas.Response)
+@router.post("/parse-blacklist", response_model=schemas.Response,
+             dependencies=[Depends(get_current_active_superuser)])
 def update_parse_blacklist(
     session: SessionDep,
     blacklist: List[ParseBlacklistItem],
@@ -352,7 +360,8 @@ def update_parse_blacklist(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/parse-blacklist/preview")
+@router.post("/parse-blacklist/preview",
+             dependencies=[Depends(get_current_active_superuser)])
 def preview_parse_blacklist(
     session: SessionDep,
     preview_data: ParseBlacklistPreviewRequest,
