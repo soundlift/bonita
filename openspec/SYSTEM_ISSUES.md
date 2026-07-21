@@ -1,6 +1,6 @@
 # Bonita 系统严重问题清单
 
-> 探索模式自动排查产物 · 2026-07-21（更新于 2026-07-21 晚间审计后）
+> 探索模式自动排查产物 · 2026-07-21（更新于 2026-07-21 post-audit 修复后）
 > 范围：`backend/bonita`（FastAPI + Celery + SQLite + watchdog）与 `frontend/src`（Vue 3 + Vite + Pinia）
 > 评级：**P0 安全/数据丢失** · **P1 正确性/可用性** · **P2 稳健性/可维护性**
 
@@ -37,22 +37,44 @@
 
 ### 审计新发现（2026-07-21 晚间）
 
-**后端（4 项）→ OpenSpec change: `fix-backend-audit-bugs`**
+**后端（4 项）→ OpenSpec change: `fix-backend-audit-bugs` ✅ 已归档**
 
 | 编号 | 问题 | 严重性 | 状态 |
 |------|------|--------|------|
-| NEW-1 | `destpath=None` 时 `os.path.exists` 抛 TypeError | P1 | 待修复 |
-| NEW-2 | WS 日志正则 message 含 PID/TID 前缀（噪声） | P2 | 待修复 |
-| NEW-3 | WebSocket 双重 `accept()` 调用 | P1 | 待修复 |
-| NEW-4 | `LOGGING_LOCATION` 相对路径在 Celery 中解析不一致 | P2 | 待修复 |
+| NEW-1 | `destpath=None` 时 `os.path.exists` 抛 TypeError | P1 | ✅ 已修复 |
+| NEW-2 | WS 日志正则 message 含 PID/TID 前缀（噪声） | P2 | ✅ 已修复 |
+| NEW-3 | WebSocket 双重 `accept()` 调用 | P1 | ✅ 已修复 |
+| NEW-4 | `LOGGING_LOCATION` 相对路径在 Celery 中解析不一致 | P2 | ✅ 已修复 |
 
-**前端（17 项）→ OpenSpec change: `fix-frontend-race-conditions`**
+**前端（17 项）→ OpenSpec change: `fix-frontend-race-conditions` ✅ 已归档**
 
-| 组件 | 问题数 | 关键问题 |
-|------|--------|----------|
-| Records.vue | 7 | 请求竞态、生命周期泄漏、localStorage 校验缺失 |
-| ScrapeLogDrawer.vue | 6 | 请求竞态、轮询重叠、错误静默 |
-| Logs.vue | 4 | WS 事件过期、认证错误无 UI 反馈 |
+| 组件 | 问题数 | 关键问题 | 状态 |
+|------|--------|----------|------|
+| Records.vue | 7 | 请求竞态、生命周期泄漏、localStorage 校验缺失 | ✅ 已修复 |
+| ScrapeLogDrawer.vue | 6 | 请求竞态、轮询重叠、错误静默 | ✅ 已修复 |
+| Logs.vue | 4 | WS 事件过期、认证错误无 UI 反馈 | ✅ 已修复 |
+
+### Post-audit 修复（2026-07-21 深夜）
+
+审计验证阶段发现已提交代码存在编译阻塞和若干遗漏，本轮修复：
+
+| 编号 | 问题 | 严重性 | 状态 | 修复位置 |
+|------|------|--------|------|----------|
+| PA-1 | Records.vue confirmDelete 多余 `}` 致编译失败 | P0 | ✅ 已修复 | `frontend/src/pages/Records.vue` |
+| PA-2 | Records.vue itemsPerPage watcher 未闭合 `)` 致编译失败 | P0 | ✅ 已修复 | `frontend/src/pages/Records.vue` |
+| PA-3 | ScrapeLogDrawer.vue formatDateTime 缺少闭合 `}` 致编译失败 | P0 | ✅ 已修复 | `frontend/src/components/record/ScrapeLogDrawer.vue` |
+| PA-4 | file_browser 空 ALLOWED_FILE_ROOTS 默认放开全盘 | P1 | ✅ 已修复 | `backend/bonita/api/routes/file_browser.py` |
+| PA-5 | metadata.py sort_by 无白名单（P1-13 同类遗漏） | P1 | ✅ 已修复 | `backend/bonita/api/routes/metadata.py` |
+| PA-6 | SECRET_KEY 生成无文件锁，并发首启动可能不一致 | P1 | ✅ 已修复 | `backend/bonita/core/config.py` |
+| PA-7 | SQLALCHEMY_DATABASE_URI 类级 f-string 在覆盖后不重算 | P1 | ✅ 已修复 | `backend/bonita/core/config.py` |
+| PA-8 | clean_others `LIKE root_path%` 误匹配兄弟目录 | P1 | ✅ 已修复 | `backend/bonita/celery_tasks/tasks.py` |
+| PA-9 | task_config / scraping_config DELETE 无 404 处理 | P2 | ✅ 已修复 | `backend/bonita/api/routes/{task,scraping}_config.py` |
+| PA-10 | verify_ws_token 返回类型标注错误（应为 Optional） | P2 | ✅ 已修复 | `backend/bonita/api/websockets/logs.py` |
+| PA-11 | logs.py 未使用的 Query 导入（死代码） | P2 | ✅ 已修复 | `backend/bonita/api/websockets/logs.py` |
+| PA-12 | Logs.vue isAdmin 硬编码 true | P2 | ✅ 已修复 | `frontend/src/pages/Logs.vue` |
+| PA-13 | Logs.vue 残留 console.log 调试输出 | P2 | ✅ 已修复 | `frontend/src/pages/Logs.vue` |
+| PA-14 | ScrapeLogDrawer 非 404 错误未清空 error404 状态 | P2 | ✅ 已修复 | `frontend/src/components/record/ScrapeLogDrawer.vue` |
+| PA-15 | ScrapeLogDrawer watcher await 后未重新检查 modelValue/recordId | P2 | ✅ 已修复 | `frontend/src/components/record/ScrapeLogDrawer.vue` |
 
 ---
 
@@ -521,10 +543,12 @@ def update_task_config(
 ## 修复优先级（更新）
 
 1. ✅ **已完成**：P0-1 ~ P0-5（全部 P0 清零）、P1-6、P1-7、P1-9、P1-11 ~ P1-14、P2-15、P2-17 ~ P2-20
-2. **待修复 — 后端审计 bug**（`fix-backend-audit-bugs`）：destpath None 崩溃、双重 WS accept、日志路径
-3. **待修复 — 前端竞态**（`fix-frontend-race-conditions`）：请求竞态、轮询重叠、WS 事件过期
-4. **架构级**：P1-8（Celery 嵌套 get 死锁）、P1-10（WS 日志全量读取）
-5. **产品决策**：P2-16（WatchHistory 无 user_id）
+2. ✅ **已完成**：NEW-1 ~ NEW-4（`fix-backend-audit-bugs`，已归档）
+3. ✅ **已完成**：前端 17 项竞态（`fix-frontend-race-conditions`，已归档）
+4. ✅ **已完成**：PA-1 ~ PA-15（post-audit 修复，本次提交）
+5. **待修复 — 验证任务**：`transfer-safety-transaction` 5.x、`records-tabs-and-scrape-logs` 4.4/5.4/7.7/8.3/13.x、`records-view-customization` 9.x、`add-records-createtime-sort` 5.x（均为运行时/E2E 验证，代码已实现）
+6. **架构级**：P1-8（Celery 嵌套 get 死锁）、P1-10（WS 日志全量读取）
+7. **产品决策**：P2-16（WatchHistory 无 user_id）
 
 ---
 
@@ -532,11 +556,14 @@ def update_task_config(
 
 | Change | 覆盖范围 | 状态 |
 |--------|----------|------|
-| `harden-auth-and-secrets` | P0-2 ~ P0-5, P2-17 | ✅ 已完成 |
-| `fix-task-lifecycle-and-safety` | P1-6, P1-7, P1-9, P2-18, P2-19 | ✅ 已完成 |
-| `fix-input-validation-and-data-safety` | P1-12 ~ P1-14, P2-15, P2-20 | ✅ 已完成 |
-| `records-tabs-and-scrape-logs` | 功能：tabs + scrape_log + skip_on_success | 🔄 50/66（剩余验证） |
+| `harden-auth-and-secrets` | P0-2 ~ P0-5, P2-17 | ✅ 已归档 |
+| `fix-task-lifecycle-and-safety` | P1-6, P1-7, P1-9, P2-18, P2-19 | ✅ 已归档 |
+| `fix-input-validation-and-data-safety` | P1-12 ~ P1-14, P2-15, P2-20 | ✅ 已归档 |
+| `fix-backend-audit-bugs` | NEW-1 ~ NEW-4 | ✅ 已归档 |
+| `fix-frontend-race-conditions` | 前端 17 项竞态/错误处理 | ✅ 已归档 |
+| `retry-full-refresh` | 功能：force_refresh 重试 | ✅ 已归档 |
+| `records-tabs-and-scrape-logs` | 功能：tabs + scrape_log + skip_on_success | 🔄 56/66（剩余验证 + E2E） |
 | `records-view-customization` | 功能：状态筛选 + 列选择 + 持久化 | 🔄 26/35（剩余验证） |
 | `add-records-createtime-sort` | 功能：createtime 排序 | 🔄 8/14（剩余验证） |
-| `fix-backend-audit-bugs` | NEW-1 ~ NEW-4 | 📋 已提案，待实施 |
-| `fix-frontend-race-conditions` | 前端 17 项竞态/错误处理 | 📋 已提案，待实施 |
+| `transfer-safety-transaction` | 功能：转移事务保护 + MOVE 风险提示 | 🔄 15/24（剩余 5.x 验证） |
+| *(post-audit 修复 PA-1 ~ PA-15)* | 编译阻塞 + 后端安全 + 前端清理 | ✅ 已实施（本次提交，未单独建 change） |
