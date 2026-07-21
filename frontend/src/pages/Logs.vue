@@ -54,7 +54,20 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 
 const { t, locale } = useI18n()
-const isAdmin = true
+
+// 从 JWT token 解析 is_superuser 字段，用于控制清空日志按钮显示
+const isAdmin = (() => {
+  const token = localStorage.getItem("access_token")
+  if (!token) return false
+  try {
+    const payload = token.split(".")[1]
+    const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")))
+    return decoded?.is_superuser === true
+  } catch {
+    return false
+  }
+})()
+
 const logStore = useLogStore() // 使用日志存储
 
 // WebSocket连接
@@ -158,7 +171,6 @@ const handleWebSocketMessage = (event: MessageEvent) => {
 
     // 处理认证响应
     if (data.type === "auth" && data.status === "ok") {
-      console.log("WebSocket认证成功")
       wsConnectionStatus.value = "connected"
       logStore.logs = []
       return
@@ -224,7 +236,6 @@ const createWebSocketConnection = () => {
     }
     ws.onclose = (event) => {
       if (myId !== wsInstanceId) return
-      console.log("WebSocket连接已关闭")
       wsConnectionStatus.value = "disconnected"
       if (event.code === 1008) {
         authError.value = t('pages.logs.authFailed') || '认证失败，请重新登录'

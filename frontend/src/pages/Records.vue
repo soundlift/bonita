@@ -406,7 +406,6 @@ const confirmDelete = async () => {
   // 重新加载以刷新列表（loadData 读取当前 activeTab/searchQuery/sortBy，上下文保持）
   await loadData(recordStore.currentPage, recordStore.itemsPerPage)
 }
-}
 
 const handleRetry = () => {
   if (selected.value.length === 0) return
@@ -452,6 +451,8 @@ watch(
       saveSettings()
     }
   },
+)
+
 const handleClearSearch = () => {
   searchQuery.value = ""
   taskIdQuery.value = ""

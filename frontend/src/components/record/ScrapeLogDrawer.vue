@@ -65,6 +65,8 @@ function formatDateTime(dateStr: string | null | undefined) {
     second: "2-digit",
     hour12: false,
   })
+}
+
 async function loadLatestLog() {
   if (props.recordId == null) return
   const gen = ++fetchGeneration.value
@@ -83,6 +85,7 @@ async function loadLatestLog() {
       scrapeLog.value = null
     } else {
       console.error("Failed to load scrape log:", err)
+      error404.value = false // 切换到非 404 错误时清除 404 状态
       error.value = t('pages.records.scrapeLog.loadError') || '加载日志失败'
     }
   } finally {
@@ -134,6 +137,8 @@ watch(
   async ([open, _rid]) => {
     if (open && _rid != null) {
       await loadLatestLog()
+      // await 之后需重新检查抽屉是否仍打开、recordId 是否仍一致
+      if (!props.modelValue || props.recordId !== _rid) return
       if (!isTerminal.value) {
         startPolling() // 即使 404 也启动轮询，任务创建日志后自动出现
       }
