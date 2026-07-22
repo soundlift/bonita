@@ -33,6 +33,7 @@ def read_users(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
 def create_user(*, session: SessionDep, user_in: schemas.UserCreate) -> Any:
     """
     Create new user.
+    注意：Bonita 为单用户设计，多用户场景下观看历史、收藏、评分等数据不隔离。
     """
     user = User.get_user_by_email(session=session, email=user_in.email)
     if user:

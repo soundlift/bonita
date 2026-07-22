@@ -144,14 +144,25 @@ def _ensure_secret_key(cfg: Settings) -> None:
     lock_path = _yaml_path + ".lock"
     lock_fd = None
     held_lock = False
+
+    # 僵尸锁清理：锁文件超过 30 秒视为僵尸锁（进程崩溃残留）
+    if os.path.exists(lock_path):
+        try:
+            lock_age = time.time() - os.path.getmtime(lock_path)
+            if lock_age > 30:
+                os.remove(lock_path)
+                _logger.warning("[BONITA] 清理僵尸 SECRET_KEY 锁文件（已存在 %.0f 秒）", lock_age)
+        except OSError:
+            pass
+
     try:
         # 尝试原子创建锁文件；失败说明另一进程正在写入
         lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         held_lock = True
     except FileExistsError:
         # 另一进程持有锁，短暂等待后直接读取其写入结果
-        for _ in range(20):
-            time.sleep(0.1)
+        for _ in range(50):
+            time.sleep(0.2)
             try:
                 lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 held_lock = True

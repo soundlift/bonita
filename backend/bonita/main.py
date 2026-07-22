@@ -28,6 +28,20 @@ async def lifespan(app: FastAPI):
     logger.info(f"Bonita version: {__version__}")
     init_db()
     init_service()
+
+    # 单用户系统检测：多用户时输出警告
+    try:
+        from bonita.db import SessionFactory
+        from bonita.db.models.user import User
+        with SessionFactory() as session:
+            user_count = session.query(User).count()
+            if user_count > 1:
+                logger.warning(
+                    f"检测到 {user_count} 个用户账户。Bonita 设计为单用户系统，"
+                    "多用户场景下观看历史、收藏、评分等数据不隔离。"
+                )
+    except Exception as e:
+        logger.debug(f"用户数量检查跳过: {e}")
     yield
     # Shutdown
     stop_monitor()

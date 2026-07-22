@@ -28,7 +28,9 @@ Harden application security by enforcing secret key rotation, preventing weak pa
 
 #### Scenario: 并发启动（uvicorn reload + Celery worker）
 - **WHEN** 多个进程同时检测到默认值并尝试写入
-- **THEN** 通过文件锁保护写入；先获得锁的进程写入后，后续进程检测到新值直接使用，不重复生成
+- **THEN** 通过文件锁保护写入（`O_CREAT | O_EXCL` 原子创建）；先获得锁的进程写入后，后续进程检测到新值直接使用，不重复生成
+- **AND** 锁等待超时 10 秒（50×0.2s），覆盖 SMB/NFS 写入延迟场景
+- **AND** 锁文件超过 30 秒视为僵尸锁（进程崩溃残留），自动清理后重新获取
 
 ---
 

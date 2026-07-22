@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from sqlalchemy import or_, desc, asc
+from fastapi import HTTPException
 
 from bonita.db.models.record import TransRecords
 from bonita.db.models.extrainfo import ExtraInfo
@@ -78,7 +79,7 @@ class RecordService:
 
         # 添加排序（白名单校验，防止属性注入）
         if sort_by not in _ALLOWED_SORT_FIELDS_RECORDS:
-            sort_by = "updatetime"
+            raise HTTPException(status_code=400, detail=f"无效排序字段: {sort_by}")
         sort_field = getattr(TransRecords, sort_by, TransRecords.updatetime)
         if sort_desc:
             query = query.order_by(desc(sort_field))

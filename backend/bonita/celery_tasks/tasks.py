@@ -39,8 +39,7 @@ semaphore = Semaphore(max_concurrent_tasks)
 logger = logging.getLogger(__name__)
 
 
-@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3},
-             name='transfer:all')
+@shared_task(bind=True, name='transfer:all')
 @manage_celery_task("TransferAll")
 def celery_transfer_entry(self, task_json):
     """ 转移任务入口
@@ -63,45 +62,34 @@ def celery_transfer_entry(self, task_json):
     progress_tracker.set_progress(25, "创建转移任务组")
     transfer_group = group(celery_transfer_group.s(task_json, entry.path) for entry in dirs)
 
-    # 先执行所有转移任务
+    # 同步执行所有转移任务（消除异步 get() 死锁风险）
     progress_tracker.set_progress(35, "执行转移任务")
-    if os.environ.get("MAX_CONCURRENCY") == "1":
-        transfer_result = transfer_group.apply()
-    else:
-        transfer_result = transfer_group.apply_async()
+    transfer_result = transfer_group.apply()
 
-    # 使用 allow_join_result 上下文管理器等待转移任务完成
-    progress_tracker.set_progress(50, "等待转移任务完成")
-    with allow_join_result():
-        done_list = transfer_result.get()
-        progress_tracker.set_progress(70, "处理转移结果")
-        if isinstance(done_list, list):
-            flat_done_list = []
-            for sublist in done_list:
-                if isinstance(sublist, list):
-                    flat_done_list.extend(sublist)
-                else:
-                    flat_done_list.append(sublist)
-            done_list = flat_done_list
-        # 剔除 done_list 中的重复项
-        if done_list:
-            done_list = list(set(done_list))
-        logger.info(f"  ✓ 转移完成 - 共处理 {len(done_list)} 个文件")
+    progress_tracker.set_progress(50, "处理转移结果")
+    done_list = transfer_result.get()
+    progress_tracker.set_progress(70, "处理转移结果")
+    if isinstance(done_list, list):
+        flat_done_list = []
+        for sublist in done_list:
+            if isinstance(sublist, list):
+                flat_done_list.extend(sublist)
+            else:
+                flat_done_list.append(sublist)
+        done_list = flat_done_list
+    # 剔除 done_list 中的重复项
+    if done_list:
+        done_list = list(set(done_list))
+    logger.info(f"  ✓ 转移完成 - 共处理 {len(done_list)} 个文件")
 
-        # 转移完成后，判断是否执行清理任务或扫描任务
-        progress_tracker.set_progress(85, "执行后续任务")
-        if task_info.clean_others:
-            logger.info("  → 触发清理任务")
-            if os.environ.get("MAX_CONCURRENCY") == "1":
-                celery_clean_others.apply(args=[task_info.output_folder, done_list])
-            else:
-                celery_clean_others.apply_async(args=[task_info.output_folder, done_list])
-        if task_info.auto_watch:
-            logger.info("  → 触发媒体库扫描")
-            if os.environ.get("MAX_CONCURRENCY") == "1":
-                celery_emby_scan.apply(args=[task_json])
-            else:
-                celery_emby_scan.apply_async(args=[task_json])
+    # 转移完成后，判断是否执行清理任务或扫描任务
+    progress_tracker.set_progress(85, "执行后续任务")
+    if task_info.clean_others:
+        logger.info("  → 触发清理任务")
+        celery_clean_others.apply(args=[task_info.output_folder, done_list])
+    if task_info.auto_watch:
+        logger.info("  → 触发媒体库扫描")
+        celery_emby_scan.apply(args=[task_json])
 
     progress_tracker.complete("转移任务完成")
     logger.info(f"## [转移任务] END - ID:{task_info.id}")
@@ -612,7 +600,10 @@ def celery_clean_others(self, root_path, done_list=None):
     # 从数据库查询该 output_folder 下已成功转移的文件路径
     from bonita.db import SessionFactory
     from bonita.db.models.record import TransRecords
-    known_paths = set()
+    def _normalize(p: str) -> str:
+        """规范化路径：消除 ./ 差异、解析符号链接、统一大小写。"""
+        return os.path.normcase(os.path.realpath(os.path.normpath(p)))
+
     # 规范化根目录并加目录边界，避免 LIKE '/media/foo%' 误匹配 '/media/foobar'
     normalized_root = root_path.rstrip(os.sep) + os.sep
     try:
@@ -623,7 +614,7 @@ def celery_clean_others(self, root_path, done_list=None):
                 TransRecords.destpath != '',
                 TransRecords.destpath.startswith(normalized_root),
             ).all()
-            known_paths = {r.destpath for r in records}
+            known_paths = {_normalize(r.destpath) for r in records}
     except Exception as e:
         logger.error(f"  ⚠ 查询转移记录失败，跳过清理: {e}")
         return []
@@ -631,8 +622,7 @@ def celery_clean_others(self, root_path, done_list=None):
     cleaned_files = []
     dest_list = findAllFilesWithSuffix(root_path, video_type)
     for dest in dest_list:
-        real_dest = os.path.realpath(dest)
-        if real_dest not in known_paths and dest not in known_paths:
+        if _normalize(dest) not in known_paths:
             cleaned_files.append(dest)
 
     delete_errors = []
